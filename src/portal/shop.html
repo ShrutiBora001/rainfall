@@ -31,6 +31,9 @@
   .btn:hover{filter:brightness(1.08)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn.ghost{background:#1d2635;color:var(--ink);border:1px solid #2b3648}
+  .goal{flex:1;min-width:260px;background:#0c1119;border:1px solid var(--line);
+        border-radius:9px;padding:11px 13px;color:var(--ink);font-size:13.5px;font-family:inherit}
+  .goal:focus{outline:none;border-color:var(--accent)}
   .label{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);margin-bottom:10px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
   .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}
@@ -57,6 +60,17 @@
   A storefront the agent buys <em>from</em>. Every item offers installments at checkout.
   The merchant is paid in full the moment the card authorizes — the buyer repays over time.
 </p>
+
+<div class="panel" style="margin-bottom:16px">
+  <div class="label">Not stocking what you need?</div>
+  <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+    <input id="req" class="goal" placeholder="e.g. a laptop for a designer, a washing machine, a tent" />
+    <button class="btn" id="srcBtn" style="width:auto">Ask the merchandiser</button>
+  </div>
+  <div class="sub" id="srcOut" style="margin-top:10px">
+    A second agent sources the product, prices it, and assigns a real merchant category code.
+  </div>
+</div>
 
 <div class="grid" id="shelf"></div>
 <div id="status"></div>

@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { RainfallService } from '../core/service.js';
 import { Keeper } from '../keeper/index.js';
 import { runAgent, runScriptedAgent, agentAvailable } from '../agent/index.js';
+import { sourceItem } from '../agent/merchandiser.js';
+import { catalog } from '../core/catalog.js';
 
 /**
  * Thin HTTP surface. All behavior lives in RainfallService -- this file only
@@ -39,6 +41,21 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/shop') return json(200, await svc.storefront());
+
+    // The merchandiser agent stocks the shelf on request.
+    if (url.pathname === '/api/source') {
+      const q = url.searchParams.get('q');
+      if (!q) return json(400, { error: 'describe what you need with ?q=' });
+      const { item, costUsd } = await sourceItem(q);
+      svc.say('stock', `merchandiser added ${item.label} for "${q}"`);
+      return json(200, { item, costUsd });
+    }
+
+    if (url.pathname === '/api/catalog/reset') {
+      catalog.resetToSeed();
+      svc.say('stock', 'catalog reset to the seeded three');
+      return json(200, { ok: true });
+    }
 
     if (url.pathname === '/api/state') {
       return json(200, {

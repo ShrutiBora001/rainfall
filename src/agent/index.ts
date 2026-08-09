@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
 import Anthropic from '@anthropic-ai/sdk';
+import { anthropic } from './client.js';
 import { RainfallService, usd } from '../core/service.js';
+import { sourceItem } from './merchandiser.js';
 
 /**
  * The buyer agent.
@@ -14,26 +15,6 @@ import { RainfallService, usd } from '../core/service.js';
 
 const MODEL = 'claude-opus-5';
 
-/**
- * Build a client that trusts .env over the ambient shell.
- *
- * dotenv never overrides variables already exported, so a stale
- * ANTHROPIC_API_KEY -- or an ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL left
- * behind by another tool -- silently wins and the key in .env is ignored.
- * Worse, a key and an auth token sent together are rejected outright. Read
- * .env directly and pass the key explicitly so the file is authoritative.
- */
-function anthropic(): Anthropic {
-  let apiKey = process.env.ANTHROPIC_API_KEY;
-  try {
-    const envFile = readFileSync(new URL('../../.env', import.meta.url), 'utf8');
-    const m = envFile.match(/^ANTHROPIC_API_KEY=(.+)$/m);
-    if (m && m[1].trim()) apiKey = m[1].trim();
-  } catch {
-    // no .env -- fall back to whatever the environment provides
-  }
-  return new Anthropic({ apiKey, authToken: null });
-}
 
 const SYSTEM = `You are a procurement agent with your own credit line, transacting autonomously.
 
@@ -44,7 +25,8 @@ collateral your owner must lock behind you — repay reliably and that collatera
 is released.
 
 Work through your tools rather than assuming. Check what a purchase would cost
-you before committing to it. If a purchase is declined, read the reason and say
+you before committing to it. If the catalog has nothing suitable, use
+source_item to have the store stock something that fits, then proceed. If a purchase is declined, read the reason and say
 plainly what would need to change; do not retry the identical request.
 
 Keep responses to one or two sentences. State what you did and what happened.`;
@@ -80,6 +62,21 @@ const tools: Anthropic.Tool[] = [
         },
       },
       required: ['sku'],
+    },
+  },
+  {
+    name: 'source_item',
+    description:
+      'Ask the store to stock something it does not currently carry. Describe what is needed and the merchandiser will add a matching product to the catalog, which you can then check credit on and purchase. Only use this when search_catalog has no suitable item.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        request: {
+          type: 'string',
+          description: 'What the shopper needs, e.g. "a laptop for a designer" or "an office chair".',
+        },
+      },
+      required: ['request'],
     },
   },
   {
@@ -138,6 +135,19 @@ async function runTool(
           ? { purchased: true, obligationId: r.id }
           : { purchased: false, reason: r.reason },
       );
+    }
+
+    case 'source_item': {
+      const { item } = await sourceItem(String(input.request));
+      svc.say('stock', `merchandiser added ${item.label} — ${usd(item.cents)} at ${item.merchant}`);
+      return JSON.stringify({
+        sourced: true,
+        sku: item.sku,
+        label: item.label,
+        price: usd(item.cents),
+        merchant: item.merchant,
+        mcc: item.mcc,
+      });
     }
 
     case 'list_obligations': {

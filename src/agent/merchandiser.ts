@@ -30,9 +30,15 @@ import {
 
 const MODEL = 'claude-opus-5';
 
-const SYSTEM = `You are the merchandiser for an online store that sells durable consumer goods on installment credit.
+const SYSTEM = `You are the merchandiser for a store that sells phones and bicycles on installment credit.
 
 A shopper has asked for something the store does not stock. Add one product that satisfies the request.
+
+The store sells exactly two categories: mobile phones, and bicycles including
+e-bikes and scooters. These are the durable goods people actually buy on
+installments. If a request falls outside that, do not invent a new category —
+stock the closest phone or bicycle that serves the underlying need, and say in
+the blurb how it addresses the request.
 
 Rules:
 - Invent fictional brands and merchant names. Never use a real company's name or a real product name.

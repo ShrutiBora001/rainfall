@@ -31,14 +31,7 @@ export interface CatalogItem {
 export const MCCS: { code: string; label: string }[] = [
   { code: '5732', label: 'consumer electronics' },
   { code: '5940', label: 'bicycle shops' },
-  { code: '5691', label: 'clothing' },
-  { code: '5712', label: 'furniture' },
-  { code: '5722', label: 'household appliances' },
-  { code: '5941', label: 'sporting goods' },
-  { code: '5945', label: 'hobby and toy shops' },
-  { code: '5992', label: 'florists' },
-  { code: '7372', label: 'software' },
-  { code: '5811', label: 'caterers' },
+  { code: '5571', label: 'motorcycle shops' },
 ];
 
 /** Merchant addresses come from a fixed pool so a name always maps to one. */
@@ -57,6 +50,28 @@ export function addressForMerchant(name: string): `0x${string}` {
 }
 
 const SEED: CatalogItem[] = [
+  {
+    sku: 'budget',
+    label: 'Nimbus A1',
+    blurb: '6.1" display · 64 GB · entry handset',
+    cents: 14_900,
+    merchant: 'Voltmart Electronics',
+    merchantAddress: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+    mcc: '5732',
+    mccLabel: 'consumer electronics',
+    art: '📱',
+  },
+  {
+    sku: 'commuter',
+    label: 'Corso City 1 commuter bike',
+    blurb: '7-speed · steel frame · rack and mudguards',
+    cents: 29_900,
+    merchant: 'Corso Cycles',
+    merchantAddress: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
+    mcc: '5940',
+    mccLabel: 'bicycle shops',
+    art: '🚲',
+  },
   {
     sku: 'phone',
     label: 'Nimbus 9a',
@@ -78,17 +93,6 @@ const SEED: CatalogItem[] = [
     mcc: '5940',
     mccLabel: 'bicycle shops',
     art: '🚲',
-  },
-  {
-    sku: 'headphones',
-    label: 'Auric NC-7',
-    blurb: 'Over-ear · active noise cancelling · 40 h battery',
-    cents: 39_900,
-    merchant: 'Voltmart Electronics',
-    merchantAddress: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-    mcc: '5732',
-    mccLabel: 'consumer electronics',
-    art: '🎧',
   },
 ];
 

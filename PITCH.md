@@ -68,7 +68,7 @@ slashed, **the Rain card locked** within a second of the Monad event.
 > Rain moved the money. Monad remembered the promise.
 >
 > An onchain credit check has to finish inside the card authorization window.
-> At ~500ms blocks it fits. At twelve seconds it doesn't — you move underwriting
+> Monad is 0.3s blocks, 0.6s finality — it fits. At twelve seconds it doesn't — you move underwriting
 > off-chain and the ledger stops being a control and becomes a receipt. Monad
 > isn't where we parked the data. It's the reason the check can be onchain.
 
@@ -114,6 +114,8 @@ Read this before you demo. Every "built" row was run and observed; every
 
 | Piece | How it was verified |
 |---|---|
+| **Deployed on Monad testnet, chain 10143** | all six contracts live; addresses in `deployments/monad.json`; portal header reads `Monad testnet` |
+| **The agent runs live on `claude-opus-5`** | real tool loop, ~$0.02/run with prompt caching; declines reasoned about, not scripted |
 | 6 Solidity contracts, zero external deps | `forge test` — **18/18 passing** |
 | Ladder 100→50→0%, limits $500/$750/$1,500 | tests + live on the portal |
 | **Seasoning gate** (anti-gaming) | live: instant payoff → `onTime=4, seasoned=1`, tier unchanged |
@@ -129,7 +131,7 @@ Read this before you demo. Every "built" row was run and observed; every
 | Storefront + checkout + agent portal | run end to end repeatedly |
 | Deploy script writes its own address book | `deployments/local.json` regenerated per deploy |
 
-### Live against the real Rain API — cards, not just reads
+### Live against the real Rain API — the full card lifecycle
 
 | Fact | Evidence |
 |---|---|
@@ -142,16 +144,17 @@ Read this before you demo. Every "built" row was run and observed; every
 | PATCH echoes the *pre-update* body | re-read with GET; cost us an hour |
 | `/v1/issuing/users` — KYC'd record | `Team57 Approved`, `applicationStatus: "approved"` |
 | `/v1/issuing/balances` | `creditLimit: 1000000` — **$10,000 sandbox headroom** |
-| Collateral routes exist, our key is unauthorized | `/v1/contracts/{id}` → **403, not 404** |
+| **Collateral funding works** — `POST /v1/simulate/collateral/fund` | funding $2,500 moved `creditLimit` 1000000 → 1250000: **Rain enforces the collateral/credit relationship itself** |
+| **Real authorizations** — `POST /v1/simulate/transactions/authorize` | posts a pending spend against the card; settle moves it to `postedCharges` |
+| **Rain declines independently of our underwriter** | over-limit auth → `account_credit_limit_exceeded` — two gates, as a real card program has |
+| `settle`'s `amount` is documented optional; it is required | 400 without it |
+| Collateral *read/claim* still unauthorized | `/v1/contracts/{id}` → **403, not 404** |
 
 ### NOT built — say these plainly if asked
 
 | Gap | Consequence for the demo |
 |---|---|
-| **Not deployed to Monad.** Running on anvil, chain 31337. | Only the RPC (`testnet-rpc.monad.xyz`, chain 10143) and the deploy script are verified. **The portal header says `anvil (local)`.** Blocked on faucet — deployer `0x428581…5b40` has 0 MON. |
-| **The agent is not running live.** No `ANTHROPIC_API_KEY`. | The Claude tool-loop is written (5 tools, `claude-opus-5`, plan selection included) but has never executed. A scripted fallback drives the same tools and the UI labels itself `SCRIPTED`. |
-| **Collateral release/claim is mirrored, not executed.** | 403 on Rain's collateral routes. The *ratio* is authoritative on Monad; the Rain-side mirror is missing. The card spend limit is the half that genuinely executes. |
-| No authorization webhook wired | Rain has `/v1/issuing/webhooks` (empty). Card auths aren't driving the flow yet. |
+| **Collateral read/claim is mirrored, not executed.** | Funding works; `/v1/contracts/{id}` and `/v1/issuing/contracts` are still 403 for reads and claims. The authoritative ratio lives on Monad and the activity log says so. |
 | No login / single hardcoded agent | Contracts are multi-agent; the service pins one address. |
 | No rehearsal, no fallback video | Zero run-throughs as of writing. |
 | Flat interest, not reducing-balance | Stated in the checkout UI. |
@@ -170,13 +173,15 @@ Don't describe mirrored collateral as live. This version is stronger anyway:
 
 ---
 
-## Two things that would change the pitch most
+## What is left
 
-1. **`ANTHROPIC_API_KEY`** — turns the agent from scripted to real. The agent is
-   the premise of the event; this is the highest-leverage line item left.
-2. **Monad faucet** → `0x428581f8f49585bEA0E4e65F74AebF188D275b40` — makes the
-   Monad claim true. One command once funded.
+1. **Rehearse.** Everything is live and there have been zero run-throughs. This
+   is now the biggest risk to the demo, by a distance.
+2. **Record a fallback video** in case the venue network fails mid-pitch.
+3. *(Optional)* Real testnet USDC via `faucet.circle.com` in place of
+   `MockUSDC` — a credibility line, but it means a contract change and a
+   redeploy. Do not attempt this before a clean rehearsal.
 
-*(The Rain ask is downgraded: collateral scope on `/v1/contracts/{id}` for
-team57 would complete the ladder, but cards, freeze, and spend limits already
-work — the integration is no longer blocked, just partial.)*
+*(The Rain ask is now minor: collateral read/claim scope for team57 would close
+the last mirrored piece. Cards, authorizations, settlement, freezing, spend
+limits and collateral funding all work.)*

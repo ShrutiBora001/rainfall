@@ -12,6 +12,7 @@
     "portal:rain": "RAILS=rain tsx src/portal/server.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
     "dotenv": "^16.4.5",
     "viem": "^2.21.0"
   },

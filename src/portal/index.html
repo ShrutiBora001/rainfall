@@ -43,6 +43,10 @@
   #log div{padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;display:flex;gap:9px}
   .k{flex:0 0 74px;color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.7px;padding-top:2px}
   .stack{display:flex;flex-direction:column;gap:14px}
+  .goal{flex:1;min-width:280px;background:#0c1119;border:1px solid var(--line);
+        border-radius:9px;padding:10px 12px;color:var(--ink);font-size:13px;
+        font-family:inherit}
+  .goal:focus{outline:none;border-color:var(--accent)}
   .split{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-top:14px}
   @media (max-width:900px){.split{grid-template-columns:1fr}}
 </style>
@@ -80,12 +84,29 @@
   </div>
 </div>
 
+<div class="panel" style="margin:16px 0">
+  <div class="label">Agent — <span id="agentMode">—</span></div>
+  <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+    <input id="goal" class="goal"
+      value="You need a phone for a new hire. Find one, check what credit terms you can get, and buy it if the terms are acceptable." />
+    <button class="btn primary" id="agentBtn">Run agent</button>
+  </div>
+  <div class="sub" id="agentOut" style="margin-top:10px">idle</div>
+</div>
+
 <div class="controls">
   <button class="btn" onclick="call('/api/setup')">Register agent</button>
-  <button class="btn primary" onclick="call('/api/buy?sku=phone')">Buy Pixel 9a · $499</button>
-  <button class="btn primary" onclick="call('/api/buy?sku=bike')">Buy e-bike · $1,200</button>
+  <button class="btn" onclick="call('/api/buy?sku=phone')">Buy Pixel 9a · $499</button>
+  <button class="btn" onclick="call('/api/buy?sku=bike')">Buy e-bike · $1,200</button>
   <button class="btn" id="payBtn">Pay next installment</button>
   <button class="btn danger" id="missBtn">Force a missed payment</button>
+</div>
+
+<div class="controls" style="border-top:1px solid var(--line);padding-top:14px">
+  <span class="tag">Keeper <b id="keeperState">off</b></span>
+  <button class="btn" id="keeperBtn">Start keeper</button>
+  <button class="btn" id="autopayBtn">Autopay: on</button>
+  <button class="btn" onclick="call('/api/keeper/sweep')">Sweep now</button>
 </div>
 
 <div class="split">
@@ -181,7 +202,38 @@ async function refresh(){
   payBtn.disabled = !id; missBtn.disabled = !id;
   payBtn.onclick = ()=> id && call('/api/pay?id='+id);
   missBtn.onclick = ()=> id && call('/api/miss?id='+id);
+
+  // agent
+  agentMode.textContent = state.agentRuntime.live
+    ? 'claude-opus-5, live tool loop'
+    : 'scripted fallback — no ANTHROPIC_API_KEY set';
+  agentBtn.disabled = state.agentRuntime.busy;
+  agentBtn.textContent = state.agentRuntime.busy ? 'Agent running…' : 'Run agent';
+
+  // keeper
+  const k = state.keeper;
+  keeperState.textContent = k.active ? `running · every ${k.intervalMs/1000}s` : 'off';
+  keeperState.style.color = k.active ? 'var(--ok)' : 'var(--dim)';
+  keeperBtn.textContent = k.active ? 'Stop keeper' : 'Start keeper';
+  keeperBtn.onclick = ()=> call(k.active ? '/api/keeper/stop' : '/api/keeper/start');
+  autopayBtn.textContent = 'Autopay: ' + (k.autopay ? 'on' : 'off');
+  autopayBtn.onclick = ()=> call('/api/keeper/autopay?on=' + (k.autopay ? 'false' : 'true'));
 }
+
+agentBtn.onclick = async ()=>{
+  agentOut.textContent = 'thinking…';
+  agentBtn.disabled = true;
+  try {
+    const r = await fetch('/api/agent?goal=' + encodeURIComponent(goal.value));
+    const d = await r.json();
+    agentOut.innerHTML = d.error
+      ? '<span style="color:var(--bad)">' + d.error + '</span>'
+      : (d.scripted ? '<span class="pill warn">SCRIPTED</span> ' : '')
+        + d.text + '<br><span style="opacity:.6">tools: ' + (d.toolCalls||[]).join(' → ') + '</span>';
+  } catch (e) { agentOut.textContent = String(e); }
+  agentBtn.disabled = false;
+  refresh();
+};
 
 refresh();
 setInterval(refresh, 1500);

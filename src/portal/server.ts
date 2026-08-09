@@ -101,16 +101,23 @@ const server = createServer(async (req, res) => {
         url.searchParams.get('goal') ??
         'You need a phone for a new hire. Find one, check what credit terms you can get, and buy it if the terms are acceptable.';
       const n = url.searchParams.get('installments');
+      const sku = url.searchParams.get('sku') ?? 'phone';
       agentBusy = true;
       try {
-        const out = agentLive
-          ? await runAgent(svc, goal)
-          : await runScriptedAgent(
-              svc,
-              url.searchParams.get('sku') ?? 'phone',
-              n ? Number(n) : undefined,
-            );
-        return json(200, { ...out, scripted: !agentLive });
+        // Always attempt the real agent. A transient network failure must not
+        // strand the process on the scripted path for the rest of its life --
+        // which is exactly what a one-shot startup probe did.
+        try {
+          const out = await runAgent(svc, goal);
+          agentLive = true;
+          return json(200, { ...out, scripted: false });
+        } catch (e) {
+          const why = (e as Error).message.split('\n')[0];
+          agentLive = false;
+          svc.say('warn', `live agent unavailable (${why}) — using scripted fallback`);
+          const out = await runScriptedAgent(svc, sku, n ? Number(n) : undefined);
+          return json(200, { ...out, scripted: true, fallbackReason: why });
+        }
       } finally {
         agentBusy = false;
       }
@@ -147,6 +154,14 @@ server.listen(PORT, async () => {
   console.log(`Rainfall portal  http://localhost:${PORT}`);
   console.log(`  chain  ${svc.dep.label} (${svc.dep.chainId})`);
   console.log(`  rails  ${svc.railsMode}`);
+  // Informational only. The real decision is made per-request, so a failed
+  // probe here never locks the session into the scripted path.
   agentLive = await agentAvailable();
-  console.log(`  agent  ${agentLive ? 'claude-opus-5 (live)' : 'scripted fallback (no API access)'}`);
+  console.log(
+    `  agent  ${
+      agentLive
+        ? 'claude-opus-5 (live)'
+        : 'probe failed — will retry live on first run, scripted only if it fails again'
+    }`,
+  );
 });

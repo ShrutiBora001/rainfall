@@ -88,6 +88,21 @@
 
 <script>
 const usd = c => '$' + (c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+/** Attribute-safe text. A raw JSON.stringify here closed the onclick attribute
+ *  at its own opening quote and silently broke every button on the shelf. */
+const esc = t => String(t)
+  .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+  .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// Delegated once on a container that is never replaced, so a re-render of the
+// shelf cannot detach the handler and no data passes through markup.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b || b.disabled) return;
+  if (b.dataset.act === 'checkout') checkout(b.dataset.sku);
+  if (b.dataset.act === 'buy') buy(b.dataset.sku, b.dataset.label);
+});
 let busy = false;
 // Resolved explicitly: relying on the id-to-global mapping is what broke this,
 // and any id colliding with a built-in Window property fails the same way.
@@ -179,9 +194,9 @@ async function refresh(){
           ? per + ' &nbsp;·&nbsp; ' + (q.requiredCollateralBps/100) + '% collateral'
           : '<span style="color:var(--bad)">not available on credit — ' + (q?q.reason:'…') + '</span>'
       }</div>
-      <button class="btn" onclick="checkout('${i.sku}')">Buy with installments →</button>
-      <button class="btn ghost" ${q&&q.approved?'':'disabled'}
-        onclick="buy('${i.sku}', ${JSON.stringify(i.label)})">One-click · let the agent decide</button>
+      <button class="btn" data-act="checkout" data-sku="${i.sku}">Buy with installments →</button>
+      <button class="btn ghost" data-act="buy" data-sku="${i.sku}" data-label="${esc(i.label)}"
+        ${q&&q.approved?'':'disabled'}>One-click · let the agent decide</button>
     </div>`;
   }).join('');
   if (shelfHtml !== lastShelf) { shelf.innerHTML = shelfHtml; lastShelf = shelfHtml; }

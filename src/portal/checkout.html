@@ -186,20 +186,38 @@ function pick(n){ chosen = data.plans.find(p=>p.installments===n); renderPlans()
 document.getElementById('pay').onclick = async ()=>{
   const btn = document.getElementById('pay');
   btn.disabled = true; btn.textContent = 'Agent working…';
-  result.innerHTML = '<span class="sub">underwriting, issuing a scoped card, opening the obligation…</span>';
+  // A static line during a 20-40s wait is indistinguishable from a hang, which
+  // is exactly how this read. Show the clock and the step.
+  const t0 = Date.now();
+  const tick = setInterval(function(){
+    result.innerHTML = '<span class="sub">underwriting, issuing a scoped card, '
+      + 'authorizing on Rain… ' + ((Date.now()-t0)/1000).toFixed(0) + 's</span>';
+  }, 250);
   try{
     const goal = `A customer is checking out the ${data.item.label} at ${usd(data.item.cents)} `
       + `on a ${chosen.installments}-installment plan. Check the terms and complete the purchase if acceptable.`;
-    const r = await fetch('/api/agent?sku='+encodeURIComponent(data.item.sku)
-      + '&installments='+chosen.installments + '&goal='+encodeURIComponent(goal)).then(r=>r.json());
+    const res = await fetch('/api/agent?sku='+encodeURIComponent(data.item.sku)
+      + '&installments='+chosen.installments + '&goal='+encodeURIComponent(goal),
+      { signal: AbortSignal.timeout(180000) });
+    const r = await res.json();
+    if (res.status === 409) {
+      result.innerHTML = '<span style="color:var(--warn)">Another agent run is in progress.</span>';
+      return;
+    }
     if (r.error) {
       result.innerHTML = '<span style="color:var(--bad)">'+r.error+'</span>';
     } else {
       sessionStorage.removeItem('cart');
+      result.innerHTML = '';
       await showConfirmation(r);
     }
-  }catch(e){ result.innerHTML = '<span style="color:var(--bad)">'+e+'</span>'; }
-  btn.disabled = false; btn.textContent = 'Have the agent pay';
+  }catch(e){
+    result.innerHTML = '<span style="color:var(--bad)">'
+      + (e.name === 'TimeoutError' ? 'Agent run timed out after 3 minutes.' : String(e)) + '</span>';
+  } finally {
+    clearInterval(tick);
+    btn.disabled = false; btn.textContent = 'Have the agent pay';
+  }
 };
 
 /**

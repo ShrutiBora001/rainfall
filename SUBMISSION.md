@@ -80,3 +80,57 @@ $404.19 unattended.
 
 Money genuinely moves: the merchant is paid in full at authorization from a
 liquidity pool, the buyer repays over time, and LPs earn the spread.
+
+---
+
+## Submission details
+
+**What it is.** Every agentic payment stack shipping today is prepaid and
+spend-capped. Rain's Agent Control Layer bounds a card by merchant, MCC and
+amount; x402 settles from a funded wallet; AP2 binds a mandate to an
+authorization. All of them assume the money already exists. An agent can spend;
+it cannot owe, nobody underwrites it, and an agent that has repaid a hundred
+obligations carries none of that standing to the next merchant. Rainfall builds
+the missing primitive: an agent buys on a Rain scoped card, the obligation is
+minted on Monad, and repayment history progressively releases the collateral
+behind it. Miss one installment and the collateral is claimed and the card is
+locked.
+
+**What we built.** Six Solidity contracts on Monad testnet (chain 10143) — agent
+registry, credit score, underwriter, installment agreement as a transferable
+ERC-721, liquidity pool, test stablecoin — with no external dependencies. A
+`CardRails` interface with a live Rain implementation and an offline mock. A
+buyer agent (`claude-opus-5`, five tools) that is given a goal rather than a
+product. A merchandiser agent that stocks the storefront on request. A keeper
+that services obligations and enforces defaults unattended. A storefront,
+checkout with plan selection, and an operator portal showing the lifecycle end
+to end.
+
+**Process.** Rain's documentation at `docs.rain.xyz` is access-code gated, so we
+reverse-engineered the API from its own error bodies: a 401 named the required
+`api-key` header, a 404 revealed that card creation is nested under the user
+rather than at `/v1/issuing/cards`, and a `PATCH` that echoes its pre-update body
+cost an hour before we re-read with `GET`. Monad's builder one-pager later
+pointed at the real sandbox docs, which unlocked the scoped-card endpoint and its
+encrypted `sessionid` (RSA-OAEP under Rain's published key — SHA-1, not SHA-256).
+On the Monad side, the public RPC caps at 15 requests/sec and viem's multicall
+batching is silently inert unless the chain object declares where Multicall3
+lives; finding that is what made the dashboard stable.
+
+**Key achievements.** Rain enforces our scoping, not us: a card scoped to MCC
+5732 returns `scoped_card_mcc_not_allowed` for a bicycle shop and rejects a
+second authorization. Funding the collateral contract raised Rain's own credit
+limit by the deposited amount. The agent reasons rather than follows a script —
+asked for a $1,200 e-bike against a $500 limit it checked credit twice, then
+worked out unprompted that it needed either repayment history or more collateral,
+and declined to retry. The keeper enforced a default and claimed $404.19 with no
+human involved. Agent runs cost ~$0.02 with prompt caching. 20/20 contract tests.
+
+We also found and closed our own exploit: paying a plan off instantly booked four
+on-time repayments, so we gated the ladder on elapsed time. Standing is earned,
+not bought.
+
+**Known limits.** Rain's collateral read and claim routes return 403 for our
+hackathon key, so that half is mirrored on Monad and the UI says so. In the
+sandbox the scoped amount behaves as a buffered guide rather than a hard ceiling.
+Interest is flat, not reducing-balance. Cadences are compressed for demo.

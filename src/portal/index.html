@@ -93,7 +93,7 @@
     <div class="bar"><i id="collBar" style="width:100%"></i></div>
   </div>
   <div class="panel">
-    <div class="label">Credit limit</div>
+    <div class="label">Agent credit limit · Monad</div>
     <div class="hero" id="limit">—</div>
     <div class="sub" id="limitSub">earned, not deposited</div>
   </div>
@@ -103,9 +103,9 @@
     <div class="sub" id="hist">—</div>
   </div>
   <div class="panel">
-    <div class="label">Rain collateral contract</div>
-    <div class="hero" id="locked">—</div>
-    <div class="sub" id="lockedSub">locked · <span id="avail">—</span> released to principal</div>
+    <div class="label">Rain account · spending power</div>
+    <div class="hero" id="rainPower">—</div>
+    <div class="sub" id="rainSub">the funding side — collateral-backed, not earned</div>
   </div>
 </div>
 
@@ -291,9 +291,20 @@ async function refresh(){
     + `</span>`;
   limitSub.textContent = Number(c.creditLimit)===0 ? 'revoked after default' : 'earned, not deposited';
 
-  if (state.collateral){
-    locked.textContent = '$' + (state.collateral.lockedCents/100).toLocaleString();
-    avail.textContent = '$' + (state.collateral.availableCents/100).toLocaleString();
+  // Two credit systems, deliberately shown side by side: Rain lends against
+  // posted collateral, Rainfall lends against repayment history.
+  const ra = state.rainAccount;
+  if (ra) {
+    rainPower.textContent = c2(ra.spendingPowerCents);
+    rainSub.innerHTML = `limit ${c2(ra.creditLimitCents)}`
+      + ` · ${c2(ra.postedChargesCents)} posted`
+      + (ra.pendingChargesCents ? ` · ${c2(ra.pendingChargesCents)} pending` : '');
+  } else if (state.collateral) {
+    rainPower.textContent = c2(state.collateral.lockedCents);
+    rainSub.textContent = 'collateral locked · Rain balances unavailable';
+  } else {
+    rainPower.textContent = '—';
+    rainSub.textContent = 'Rain account unavailable on these rails';
   }
 
   quotes.innerHTML = Object.values(state.quotes).map(q=>`

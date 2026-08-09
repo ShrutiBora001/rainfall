@@ -505,6 +505,10 @@ export class RainfallService {
       rainUser,
       collateralContractId: this.collateralId,
       collateral: await this.rails.getCollateral(this.collateralId).catch(() => null),
+      // The funding side, as Rain sees it. Distinct from the agent's own credit
+      // limit above: Rain lends against posted collateral, Rainfall lends
+      // against repayment history.
+      rainAccount: await this.rails.balances().catch(() => null),
       principal: this.principal,
       agent: this.agent,
       registered,
@@ -697,6 +701,10 @@ export class RainfallService {
         seasoningPeriodSeconds: Number(seasoning),
       },
       collateral: await this.rails.getCollateral(this.collateralId).catch(() => null),
+      // The funding side, as Rain sees it. Distinct from the agent's own credit
+      // limit above: Rain lends against posted collateral, Rainfall lends
+      // against repayment history.
+      rainAccount: await this.rails.balances().catch(() => null),
       pool: { totalAssets: poolAssets.toString(), deployed: deployed.toString() },
       agreements,
       quotes,

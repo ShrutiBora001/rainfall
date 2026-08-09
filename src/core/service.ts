@@ -134,6 +134,22 @@ export class RainfallService {
       centsToUnits(9_000_000),
     ]);
     await this.rails.setRequiredCollateral(this.collateralId, 10_000).catch(() => {});
+
+    // Put the principal's collateral behind the account. On live Rain this
+    // raises the account's own credit limit by the deposited amount.
+    try {
+      await this.rails.fundCollateral(this.collateralId, 250_000);
+      const b = await this.rails.balances();
+      this.say(
+        'collateral',
+        b
+          ? `$2,500 collateral funded on Rain — credit limit now ${usd(b.creditLimitCents)}`
+          : `$2,500 collateral funded on Rain`,
+      );
+    } catch (e) {
+      this.say('warn', `collateral funding unavailable: ${(e as Error).message}`);
+    }
+
     await this.ensureStandingCard();
     this.say('ok', `agent ${this.agent.slice(0, 8)} registered, principal funded`);
   }
@@ -198,6 +214,27 @@ export class RainfallService {
       'card',
       `Rain card ${card.last4} scoped to ${item.merchant} for ${usd(item.cents)}`,
     );
+
+    // Run it through the card network. Rain applies its own limits and MCC
+    // rules here and can decline independently of our underwriter -- two
+    // separate gates, which is exactly how a real card program behaves.
+    try {
+      const auth = await this.rails.authorize({
+        cardId: card.cardId,
+        amountCents: item.cents,
+        merchant: item.merchant,
+        mcc: item.mcc,
+      });
+      if (auth.status !== 'authorized') {
+        this.say('decline', `Rain declined the authorization — ${auth.declinedReason}`);
+        return { approved: false, reason: `card declined: ${auth.declinedReason}` };
+      }
+      this.say('auth', `Rain authorized ${usd(item.cents)} · tx ${auth.transactionId.slice(0, 8)}`);
+      await this.rails.settle(auth.transactionId, item.cents);
+      this.say('settle', `authorization settled — posted to the account`);
+    } catch (e) {
+      this.say('warn', `authorization step skipped: ${(e as Error).message}`);
+    }
 
     const receipt = installments
       ? await this.send(this.dep.contracts.Underwriter, underwriterAbi, 'authorizeWithPlan', [

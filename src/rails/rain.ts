@@ -5,6 +5,9 @@ import {
   Cents,
   CollateralState,
   AuthEvent,
+  AuthRequest,
+  AuthResult,
+  RailsBalances,
   Decision,
   RailsError,
 } from './types.js';
@@ -15,7 +18,7 @@ import {
  * Every route and field below was established by probing the sandbox directly
  * (docs.rain.xyz is access-code gated) and confirmed by creating real cards:
  *
- *   base      https://api-dev.rain.xyz     (api.rain.xyz rejects this key)
+ *   base      https://api-dev.raincards.xyz     (api.rain.xyz rejects this key)
  *   auth      header `api-key`             (not Authorization: Bearer)
  *   create    POST /v1/issuing/users/{userId}/cards
  *             body {type:"virtual", limit:{amount:<cents>, frequency:<enum>}}
@@ -45,7 +48,7 @@ export class RainRails implements CardRails {
   private handler?: (auth: AuthEvent) => Promise<Decision>;
 
   constructor(private readonly cfg: RainConfig) {
-    this.base = (cfg.baseUrl ?? 'https://api-dev.rain.xyz').replace(/\/$/, '');
+    this.base = (cfg.baseUrl ?? 'https://api-dev.raincards.xyz').replace(/\/$/, '');
   }
 
   private async req<T>(
@@ -142,23 +145,81 @@ export class RainRails implements CardRails {
     return this.handler(auth);
   }
 
-  // ---- collateral ----
+  // ---- authorizations, settlement, collateral ----
   //
-  // /v1/contracts/{id} and /v1/issuing/contracts both return 403 for this key:
-  // the routes exist, we are not scoped to them. Rather than fake a number,
-  // these throw and the caller mirrors the ratio on Monad instead. The card
-  // spend limit above is the part of the ladder that genuinely executes here.
+  // These are Rain's sandbox simulation endpoints, documented at
+  // rain-sandbox-trial.mintlify.site. They are how a card program is exercised
+  // without a physical terminal, and they run the real authorization path:
+  // limits, MCC rules, and the account's credit position all apply.
+
+  /**
+   * Fund the account's collateral contract. Observed on the sandbox: a 250000
+   * deposit moved creditLimit from 1000000 to 1250000 — Rain enforces the
+   * collateral/credit relationship itself.
+   */
+  async fundCollateral(contractId: string, cents: Cents): Promise<void> {
+    await this.req('/v1/simulate/collateral/fund', {
+      method: 'POST',
+      body: { contractId, currency: 'rusd', amount: cents },
+    });
+  }
+
+  /** A real authorization. Rain decides — including declining it. */
+  async authorize(req: AuthRequest): Promise<AuthResult> {
+    const r = await this.req<any>('/v1/simulate/transactions/authorize', {
+      method: 'POST',
+      body: {
+        cardId: req.cardId,
+        amount: req.amountCents,
+        currency: 'USD',
+        merchantName: req.merchant,
+        merchantCategoryCode: req.mcc,
+      },
+    });
+    return {
+      transactionId: r.transactionId,
+      status: r.status,
+      declinedReason: r.declinedReason,
+    };
+  }
+
+  /** `amount` is documented as optional; it is not. Always send it. */
+  async settle(transactionId: string, cents: Cents): Promise<void> {
+    await this.req(`/v1/simulate/transactions/${transactionId}/settle`, {
+      method: 'POST',
+      body: { amount: cents },
+    });
+  }
+
+  async balances(): Promise<RailsBalances | null> {
+    try {
+      const r = await this.req<any>('/v1/issuing/balances');
+      return {
+        creditLimitCents: r.creditLimit ?? 0,
+        pendingChargesCents: r.pendingCharges ?? 0,
+        postedChargesCents: r.postedCharges ?? 0,
+        spendingPowerCents: r.spendingPower ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // The collateral *read* and *claim* routes remain 403 for this key —
+  // /v1/contracts/{id} and /v1/issuing/contracts both exist and both refuse
+  // us. Funding works (above), reading the balance back does not, so the
+  // authoritative ratio stays on Monad rather than being faked here.
 
   async getCollateral(_contractId: string): Promise<CollateralState> {
-    throw new RailsError('Rain collateral routes are 403 for this key', 403);
+    throw new RailsError('Rain collateral read is 403 for this key', 403);
   }
 
   async setRequiredCollateral(_contractId: string, _ratioBps: number): Promise<void> {
-    throw new RailsError('Rain collateral routes are 403 for this key', 403);
+    throw new RailsError('Rain collateral write is 403 for this key', 403);
   }
 
   async claimCollateral(_contractId: string, _amountCents: Cents): Promise<void> {
-    throw new RailsError('Rain collateral routes are 403 for this key', 403);
+    throw new RailsError('Rain collateral claim is 403 for this key', 403);
   }
 }
 

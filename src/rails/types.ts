@@ -47,6 +47,27 @@ export interface Decision {
   reason?: string;
 }
 
+export interface AuthRequest {
+  cardId: string;
+  amountCents: Cents;
+  merchant: string;
+  mcc: string;
+}
+
+export interface AuthResult {
+  transactionId: string;
+  /** "authorized" or "declined" — the rails' own decision, not ours. */
+  status: string;
+  declinedReason?: string;
+}
+
+export interface RailsBalances {
+  creditLimitCents: Cents;
+  pendingChargesCents: Cents;
+  postedChargesCents: Cents;
+  spendingPowerCents: Cents;
+}
+
 export interface CollateralState {
   lockedCents: Cents;
   availableCents: Cents;
@@ -74,6 +95,22 @@ export interface CardRails {
    * the spend limit is ours to move.
    */
   setSpendLimit(cardId: string, cents: Cents): Promise<void>;
+
+  /**
+   * Put collateral behind the account. On live Rain this raises the account's
+   * credit limit by the deposited amount — the collateral/credit relationship
+   * this whole project models, enforced by the card network rather than by us.
+   */
+  fundCollateral(contractId: string, cents: Cents): Promise<void>;
+
+  /** Run a real card authorization through the rails. */
+  authorize(req: AuthRequest): Promise<AuthResult>;
+
+  /** Turn an authorization hold into a posted charge. */
+  settle(transactionId: string, cents: Cents): Promise<void>;
+
+  /** Account-level credit position as the rails see it. */
+  balances(): Promise<RailsBalances | null>;
 
   getCollateral(contractId: string): Promise<CollateralState>;
   setRequiredCollateral(contractId: string, ratioBps: number): Promise<void>;

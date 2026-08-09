@@ -5,6 +5,9 @@ import {
   Cents,
   CollateralState,
   AuthEvent,
+  AuthRequest,
+  AuthResult,
+  RailsBalances,
   Decision,
   RailsError,
 } from './types.js';
@@ -103,6 +106,29 @@ export class MockRails implements CardRails {
       lockedCents: c.lockedCents - amountCents,
       availableCents: c.availableCents,
     });
+  }
+
+  async fundCollateral(contractId: string, cents: Cents): Promise<void> {
+    const c = await this.getCollateral(contractId);
+    this.collateral.set(contractId, {
+      lockedCents: c.lockedCents,
+      availableCents: c.availableCents + cents,
+    });
+  }
+
+  async authorize(req: AuthRequest): Promise<AuthResult> {
+    const d = await this.simulateAuthorization(req.cardId, req.amountCents);
+    return {
+      transactionId: `tx_mock_${++this.seq}`,
+      status: d.approve ? 'authorized' : 'declined',
+      declinedReason: d.reason,
+    };
+  }
+
+  async settle(_transactionId: string, _cents: Cents): Promise<void> {}
+
+  async balances(): Promise<RailsBalances | null> {
+    return null;
   }
 
   // ---- demo controls, not part of CardRails ----

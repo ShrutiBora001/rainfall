@@ -107,12 +107,22 @@ checkout with plan selection, and an operator portal showing the lifecycle end
 to end.
 
 **Process.** Rain's documentation at `docs.rain.xyz` is access-code gated, so we
-reverse-engineered the API from its own error bodies: a 401 named the required
-`api-key` header, a 404 revealed that card creation is nested under the user
-rather than at `/v1/issuing/cards`, and a `PATCH` that echoes its pre-update body
-cost an hour before we re-read with `GET`. Monad's builder one-pager later
-pointed at the real sandbox docs, which unlocked the scoped-card endpoint and its
-encrypted `sessionid` (RSA-OAEP under Rain's published key — SHA-1, not SHA-256).
+began by reverse-engineering the API from its own error bodies: a 401 named the
+required `api-key` header, a 404 revealed that card creation is nested under the
+user rather than at `/v1/issuing/cards`, and a `PATCH` that echoes its pre-update
+body cost an hour before we re-read with `GET`. We built the whole integration
+this way.
+
+Later, Monad's builder one-pager pointed us at Rain's public sandbox
+documentation at `rain-sandbox-trial.mintlify.site`, which was never gated — we
+had simply been looking at the wrong host. It confirmed the mapping we had
+derived and unlocked three things we could not have guessed: the scoped-card
+endpoint with its encrypted `sessionid` (RSA-OAEP under Rain's published key —
+SHA-1, not SHA-256), and the simulation endpoints for authorizing, settling and
+funding collateral. Those turned a card-issuing integration into the full
+lifecycle. Worth saying plainly: the gated host cost us hours, and the answer was
+a different URL.
+
 On the Monad side, the public RPC caps at 15 requests/sec and viem's multicall
 batching is silently inert unless the chain object declares where Multicall3
 lives; finding that is what made the dashboard stable.

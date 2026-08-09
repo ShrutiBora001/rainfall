@@ -20,6 +20,10 @@ contract CreditScore is Auth {
         uint32 defaults;
         uint96 totalRepaid; // base units, lifetime
         uint16 score; // 0..1000
+        /// Repayments that advanced the ladder. Always <= onTime.
+        uint32 seasoned;
+        /// When the last seasoned repayment was counted.
+        uint64 lastSeasonedAt;
     }
 
     mapping(address => Record) private records;
@@ -33,6 +37,20 @@ contract CreditScore is Auth {
     uint256 public constant LIMIT_TIER1 = 750e6; // $750
     uint256 public constant LIMIT_TIER2 = 1500e6; // $1,500
 
+    /// @notice Minimum spacing between two repayments that both count toward
+    /// the ladder.
+    ///
+    /// Without this, creditworthiness is purely a counter, and a counter can be
+    /// bought: an agent holding cash could open a plan, settle it immediately,
+    /// and book four "on-time" repayments in a single block -- climbing to
+    /// uncollateralized without ever having been trusted overnight. What the
+    /// ladder is supposed to measure is reliability *over time*, so time has to
+    /// be part of the measurement.
+    ///
+    /// Repayments inside the window still count as repaid and still clear the
+    /// debt. They just don't buy standing.
+    uint64 public seasoningPeriod = 1 days;
+
     uint16 public constant SCORE_START = 500;
     uint16 public constant SCORE_MAX = 1000;
     uint16 public constant SCORE_ON_TIME = 40;
@@ -42,6 +60,8 @@ contract CreditScore is Auth {
     event RepaymentRecorded(address indexed agent, uint256 amount, bool onTime, uint16 score);
     event DefaultRecorded(address indexed agent, uint16 score);
     event TierChanged(address indexed agent, uint16 requiredCollateralBps, uint256 creditLimit);
+    event SeasonedRepayment(address indexed agent, uint32 seasoned);
+    event SeasoningPeriodSet(uint64 seconds_);
 
     constructor(address _owner) Auth(_owner) {}
 
@@ -60,6 +80,15 @@ contract CreditScore is Auth {
             r.onTime += 1;
             uint16 next = r.score + SCORE_ON_TIME;
             r.score = next > SCORE_MAX ? SCORE_MAX : next;
+
+            // Only a repayment far enough from the last counted one advances
+            // the ladder. The first is always free -- there is nothing to
+            // space it against.
+            if (r.lastSeasonedAt == 0 || block.timestamp >= r.lastSeasonedAt + seasoningPeriod) {
+                r.seasoned += 1;
+                r.lastSeasonedAt = uint64(block.timestamp);
+                emit SeasonedRepayment(agent, r.seasoned);
+            }
         } else {
             r.late += 1;
             r.score = r.score > SCORE_LATE ? r.score - SCORE_LATE : 0;
@@ -84,22 +113,43 @@ contract CreditScore is Auth {
 
     // ---- the ladder ----
 
+    function setSeasoningPeriod(uint64 s) external onlyOwner {
+        seasoningPeriod = s;
+        emit SeasoningPeriodSet(s);
+    }
+
     /// @notice How much of the purchase must stay locked in the agent's Rain
     /// collateral contract. 10_000 bps = fully collateralized.
+    /// @dev Reads `seasoned`, not `onTime` -- see `seasoningPeriod`.
     function requiredCollateralBps(address agent) public view returns (uint16) {
         Record memory r = records[agent];
         if (r.defaults > 0) return 10_000;
-        if (r.onTime >= TIER2_ONTIME) return 0;
-        if (r.onTime >= TIER1_ONTIME) return 5_000;
+        if (r.seasoned >= TIER2_ONTIME) return 0;
+        if (r.seasoned >= TIER1_ONTIME) return 5_000;
         return 10_000;
     }
 
     function creditLimit(address agent) public view returns (uint256) {
         Record memory r = records[agent];
         if (r.defaults > 0) return 0;
-        if (r.onTime >= TIER2_ONTIME) return LIMIT_TIER2;
-        if (r.onTime >= TIER1_ONTIME) return LIMIT_TIER1;
+        if (r.seasoned >= TIER2_ONTIME) return LIMIT_TIER2;
+        if (r.seasoned >= TIER1_ONTIME) return LIMIT_TIER1;
         return LIMIT_COLD;
+    }
+
+    /// @notice Repayments that counted toward the ladder, and how many more
+    /// the agent needs for its next tier. Surfaced so the portal can explain
+    /// a decline instead of just reporting it.
+    function seasonedOf(address agent) external view returns (uint32) {
+        return records[agent].seasoned;
+    }
+
+    function nextTierIn(address agent) external view returns (uint32) {
+        Record memory r = records[agent];
+        if (r.defaults > 0) return type(uint32).max; // no path back
+        if (r.seasoned >= TIER2_ONTIME) return 0;
+        if (r.seasoned >= TIER1_ONTIME) return TIER2_ONTIME - r.seasoned;
+        return TIER1_ONTIME - r.seasoned;
     }
 
     function scoreOf(address agent) external view returns (uint16) {

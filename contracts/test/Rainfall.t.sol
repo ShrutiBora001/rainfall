@@ -36,6 +36,8 @@ contract RainfallTest is Test {
         underwriter = new Underwriter(owner, registry, score, agreements);
 
         score.setAuthorized(address(agreements), true);
+        // Demo-scale seasoning: one ladder step per cadence, matching deploy.
+        score.setSeasoningPeriod(CADENCE);
         pool.setAuthorized(address(agreements), true);
         agreements.setAuthorized(address(underwriter), true);
 
@@ -169,8 +171,40 @@ contract RainfallTest is Test {
         (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
         vm.prank(agent);
         agreements.payoff(id);
-        // 4 installments cleared in one payment, all credited.
+        // 4 installments cleared in one payment, all credited as repaid.
         assertEq(score.recordOf(agent).onTime, 4);
+    }
+
+    /// The exploit the seasoning window exists to close: four repayments in one
+    /// block are four repayments, but they are one day's worth of standing.
+    function test_PayoffCannotBuyTheLadder() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        vm.prank(agent);
+        agreements.payoff(id);
+
+        assertEq(score.recordOf(agent).onTime, 4, "all four repaid");
+        assertEq(score.recordOf(agent).seasoned, 1, "but only one counts");
+        assertEq(score.requiredCollateralBps(agent), 10_000, "still fully collateralized");
+        assertEq(score.creditLimit(agent), 500e6, "still on the cold limit");
+    }
+
+    function test_SeasoningNeedsElapsedTime() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        // Three payments in quick succession, inside one seasoning window.
+        for (uint256 i = 0; i < 3; i++) {
+            vm.warp(block.timestamp + 1);
+            vm.prank(agent);
+            agreements.pay(id);
+        }
+        assertEq(score.recordOf(agent).onTime, 3);
+        assertEq(score.recordOf(agent).seasoned, 1, "one window, one step");
+        assertEq(score.requiredCollateralBps(agent), 10_000, "no tier without time");
+
+        // Space the next ones out and the ladder moves.
+        (uint256 id2,) = underwriter.authorize(agent, merchant, 400e6);
+        _payInstallments(id2, 2);
+        assertEq(score.recordOf(agent).seasoned, 3);
+        assertEq(score.requiredCollateralBps(agent), 5_000, "tier 1 reached honestly");
     }
 
     function test_CannotPayoffTwice() public {

@@ -46,6 +46,10 @@ contract Deploy is Script {
         // point at, which is the whole reason it exists as a distinct state.
         agreements.setGrace(cadence / 2);
 
+        // One ladder step per cadence. In production this is days; compressed
+        // here so a demo can show seasoning working rather than describe it.
+        score.setSeasoningPeriod(cadence);
+
         // Seed the pool so the first purchase can actually be funded.
         usdc.mint(deployer, 1_000_000e6);
         usdc.approve(address(pool), type(uint256).max);

@@ -374,15 +374,18 @@ export class RainfallService {
   // ---- reads ----
 
   async state() {
-    const [bps, limit, sc, rec, nextId, poolAssets, deployed] = await Promise.all([
-      this.score.read.requiredCollateralBps([this.agent]),
-      this.score.read.creditLimit([this.agent]),
-      this.score.read.scoreOf([this.agent]),
-      this.score.read.recordOf([this.agent]),
-      this.agr.read.nextId(),
-      this.pool.read.totalAssets(),
-      this.pool.read.deployed(),
-    ]);
+    const [bps, limit, sc, rec, nextId, poolAssets, deployed, toNextTier, seasoning] =
+      await Promise.all([
+        this.score.read.requiredCollateralBps([this.agent]),
+        this.score.read.creditLimit([this.agent]),
+        this.score.read.scoreOf([this.agent]),
+        this.score.read.recordOf([this.agent]),
+        this.agr.read.nextId(),
+        this.pool.read.totalAssets(),
+        this.pool.read.deployed(),
+        this.score.read.nextTierIn([this.agent]),
+        this.score.read.seasoningPeriod(),
+      ]);
 
     const agreements = [];
     for (let i = 1; i < Number(nextId); i++) {
@@ -429,6 +432,11 @@ export class RainfallService {
         onTime: rec.onTime,
         late: rec.late,
         defaults: rec.defaults,
+        // Repayments that advanced the ladder, vs raw repayment count. They
+        // diverge exactly when someone tries to buy standing in one block.
+        seasoned: rec.seasoned,
+        toNextTier: toNextTier > 1_000_000 ? null : toNextTier,
+        seasoningPeriodSeconds: Number(seasoning),
       },
       collateral: await this.rails.getCollateral(this.collateralId).catch(() => null),
       pool: { totalAssets: poolAssets.toString(), deployed: deployed.toString() },

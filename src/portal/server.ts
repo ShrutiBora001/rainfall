@@ -80,7 +80,13 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/onboarding') return json(200, await svc.onboarding());
 
     if (url.pathname === '/api/schedule') {
-      return json(200, await svc.schedule(Number(url.searchParams.get('id'))));
+      const id = Number(url.searchParams.get('id'));
+      if (!Number.isFinite(id) || id < 1) return json(400, { error: 'bad id' });
+      const sched = await svc.schedule(id);
+      // An id that never existed reads back as an empty struct rather than
+      // reverting, so check rather than returning a schedule full of zeroes.
+      if (!sched.installments) return json(404, { error: `no obligation #${id}` });
+      return json(200, sched);
     }
 
     if (url.pathname === '/api/payoff') {

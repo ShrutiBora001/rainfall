@@ -181,9 +181,19 @@ function renderSteps(s){
   ).join('');
 }
 
+let schedToken = 0;
 async function renderSchedule(id){
+  const token = ++schedToken;
   try{
     const d = await fetch('/api/schedule?id='+id).then(r=>r.json());
+    // A slower earlier request must not overwrite a newer render.
+    if (token !== schedToken) return;
+    if (!d || !Array.isArray(d.rows)) {
+      schedTitle.textContent = '';
+      schedule.innerHTML = '<div class="sub">'
+        + (d && d.error ? 'could not load #'+id : 'no schedule for #'+id) + '</div>';
+      return;
+    }
     schedTitle.textContent =
       `· #${d.id} · ${c2(d.principalCents)} principal + ${c2(d.totalInterestCents)} interest `
       + `(${d.aprBps/100}% APR) = ${c2(d.totalPayableCents)}`;
@@ -285,10 +295,15 @@ async function refresh(){
     </div>`;
   }).join('') : '<div class="sub">none yet</div>';
 
-  if (selected == null && state.agreements.length)
-    selected = state.agreements[state.agreements.length-1].id;
+  // A selection can outlive the thing it points at — after a reset the agent
+  // changes and its obligations are filtered out, leaving `selected` dangling.
+  const owned = state.agreements.some(a => a.id === selected);
+  if (!owned) selected = state.agreements.length
+    ? state.agreements[state.agreements.length-1].id
+    : null;
   renderSteps(state);
   if (selected != null) renderSchedule(selected);
+  else { schedTitle.textContent = ''; schedule.innerHTML = '<div class="sub">no obligations yet</div>'; }
 
   log.innerHTML = state.log.map(l=>`<div><span class="k">${l.kind}</span><span>${l.text}</span></div>`).join('');
 

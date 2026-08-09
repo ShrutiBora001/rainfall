@@ -154,14 +154,28 @@ export class RainfallService {
     // Put the principal's collateral behind the account. On live Rain this
     // raises the account's own credit limit by the deposited amount.
     try {
-      await this.rails.fundCollateral(this.collateralId, 250_000);
-      const b = await this.rails.balances();
-      this.say(
-        'collateral',
-        b
-          ? `$2,500 collateral funded on Rain — credit limit now ${usd(b.creditLimitCents)}`
-          : `$2,500 collateral funded on Rain`,
-      );
+      // Funding is cumulative on Rain and we cannot read the collateral balance
+      // back (403), so re-running setup would inflate the account's credit
+      // limit on every rehearsal. Use the limit itself as the idempotency
+      // check: past the funded threshold, the collateral is already there.
+      const before = await this.rails.balances();
+      const FUNDED_AT = 1_250_000; // base 1,000,000 + one 250,000 deposit
+
+      if (before && before.creditLimitCents >= FUNDED_AT) {
+        this.say(
+          'collateral',
+          `collateral already funded on Rain — credit limit ${usd(before.creditLimitCents)}`,
+        );
+      } else {
+        await this.rails.fundCollateral(this.collateralId, 250_000);
+        const after = await this.rails.balances();
+        this.say(
+          'collateral',
+          after
+            ? `$2,500 collateral funded on Rain — credit limit now ${usd(after.creditLimitCents)}`
+            : `$2,500 collateral funded on Rain`,
+        );
+      }
     } catch (e) {
       this.say('warn', `collateral funding unavailable: ${(e as Error).message}`);
     }

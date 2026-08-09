@@ -143,6 +143,31 @@ async function runTool(
 export interface AgentTurn {
   text: string;
   toolCalls: string[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costUsd: number;
+  };
+}
+
+/** claude-opus-5 list price, per million tokens. */
+const PRICE = { in: 5, out: 25, cacheWrite: 6.25, cacheRead: 0.5 };
+
+function costOf(u: {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}): number {
+  return (
+    (u.inputTokens * PRICE.in +
+      u.outputTokens * PRICE.out +
+      u.cacheWriteTokens * PRICE.cacheWrite +
+      u.cacheReadTokens * PRICE.cacheRead) /
+    1_000_000
+  );
 }
 
 /**
@@ -159,22 +184,43 @@ export async function runAgent(
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: goal }];
   const toolCalls: string[] = [];
   const maxTurns = opts.maxTurns ?? 12;
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+  };
 
   svc.say('agent', `goal: ${goal}`);
 
   for (let turn = 0; turn < maxTurns; turn++) {
     const res = await client.messages.create({
       model: MODEL,
-      max_tokens: 16000,
+      max_tokens: 8000,
       thinking: { type: 'adaptive' },
-      system: SYSTEM,
+      // Effort is the main cost dial. This agent picks between a handful of
+      // tools against a small catalogue -- it does not need deep deliberation,
+      // and `high` (the default) roughly doubles the spend for no better
+      // decision.
+      output_config: { effort: 'medium' },
+      // tools -> system -> messages is the render order, so a breakpoint on
+      // the last system block caches the tool schemas too. Both are byte-stable
+      // across runs, so every run after the first reads them at ~1/10 price.
+      system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
       tools,
       messages,
     });
 
+    usage.inputTokens += res.usage.input_tokens;
+    usage.outputTokens += res.usage.output_tokens;
+    usage.cacheReadTokens += res.usage.cache_read_input_tokens ?? 0;
+    usage.cacheWriteTokens += res.usage.cache_creation_input_tokens ?? 0;
+    usage.costUsd = costOf(usage);
+
     if (res.stop_reason === 'refusal') {
       svc.say('agent', 'model declined the request');
-      return { text: 'The model declined this request.', toolCalls };
+      return { text: 'The model declined this request.', toolCalls, usage };
     }
 
     // Append the full content, not just text -- thinking and tool_use blocks
@@ -192,7 +238,15 @@ export async function runAgent(
       .join(' ');
     if (said) svc.say('agent', said);
 
-    if (uses.length === 0) return { text: said, toolCalls };
+    if (uses.length === 0) {
+      svc.say(
+        'cost',
+        `$${usage.costUsd.toFixed(4)} this run — ` +
+          `${usage.inputTokens} in, ${usage.outputTokens} out, ` +
+          `${usage.cacheReadTokens} cached`,
+      );
+      return { text: said, toolCalls, usage };
+    }
 
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const u of uses) {
@@ -219,7 +273,7 @@ export async function runAgent(
   }
 
   svc.say('warn', `agent hit the ${maxTurns}-turn cap`);
-  return { text: `Stopped after ${maxTurns} turns.`, toolCalls };
+  return { text: `Stopped after ${maxTurns} turns.`, toolCalls, usage };
 }
 
 /**

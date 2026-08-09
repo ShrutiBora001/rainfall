@@ -63,6 +63,19 @@ export function addressForMerchant(name: string): `0x${string}` {
 
 const SEED: CatalogItem[] = [
   {
+    // Deliberately tiny: a full buy -> repay -> settle cycle costs $3, so the
+    // verification suite can exercise every path quickly and cheaply.
+    sku: 'test',
+    label: 'Nimbus Test Unit',
+    blurb: 'verification SKU · $3 · settles in two installments',
+    cents: 300,
+    merchant: 'Voltmart Electronics',
+    merchantAddress: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+    mcc: '5732',
+    mccLabel: 'consumer electronics',
+    art: '🧪',
+  },
+  {
     sku: 'budget',
     label: 'Nimbus A1',
     blurb: '6.1" display · 64 GB · entry handset',

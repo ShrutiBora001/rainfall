@@ -129,7 +129,14 @@ export class RainfallService {
       functionName: fn,
       args,
     } as any);
-    return this.pub.waitForTransactionReceipt({ hash });
+    const receipt = await this.pub.waitForTransactionReceipt({ hash });
+    // Any write invalidates the read caches. Without this a read taken straight
+    // after an action can be served a snapshot captured *during* it — the UI
+    // shows the old balance for a beat, and a test asserting on the effect of
+    // its own write fails.
+    this.stateCache = null;
+    this.shopCache = null;
+    return receipt;
   }
 
   /**
@@ -783,13 +790,15 @@ export class RainfallService {
  */
 const AGENT_POOL: `0x${string}`[] = [
   '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-  '0xA6E70000000000000000000000000000000000A1',
-  '0xA6E70000000000000000000000000000000000A2',
-  '0xA6E70000000000000000000000000000000000A3',
-  '0xA6E70000000000000000000000000000000000A4',
-  '0xA6E70000000000000000000000000000000000A5',
-  '0xA6E70000000000000000000000000000000000A6',
-  '0xA6E70000000000000000000000000000000000A7',
+  // EIP-55 checksummed. Mixed-case addresses that are not valid checksums are
+  // rejected outright by viem, which is how the first attempt at these failed.
+  '0xA6e7000000000000000000000000000000000001',
+  '0xA6E7000000000000000000000000000000000002',
+  '0xa6e7000000000000000000000000000000000003',
+  '0xA6E7000000000000000000000000000000000004',
+  '0xA6e7000000000000000000000000000000000005',
+  '0xa6E7000000000000000000000000000000000006',
+  '0xA6E7000000000000000000000000000000000007',
 ];
 
 export const usd = (cents: Cents): string =>

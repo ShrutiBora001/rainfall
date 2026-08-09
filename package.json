@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "preflight": "tsx src/rails/preflight.ts",
     "portal": "tsx src/portal/server.ts",
-    "portal:rain": "RAILS=rain tsx src/portal/server.ts"
+    "portal:rain": "RAILS=rain tsx src/portal/server.ts",
+    "verify": "tsx src/verify.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

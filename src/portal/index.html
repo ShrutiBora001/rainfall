@@ -344,18 +344,31 @@ async function refresh(){
 }
 
 agentBtn.onclick = async ()=>{
-  agentOut.textContent = 'thinking…';
   agentBtn.disabled = true;
+  const t0 = Date.now();
+  const tick = setInterval(()=>{
+    agentOut.textContent = `thinking… ${((Date.now()-t0)/1000).toFixed(0)}s`;
+  }, 250);
   try {
-    const r = await fetch('/api/agent?goal=' + encodeURIComponent(goal.value));
+    const r = await fetch('/api/agent?goal=' + encodeURIComponent(goal.value),
+      { signal: AbortSignal.timeout(180000) });
     const d = await r.json();
+    if (r.status === 409) {
+      agentOut.innerHTML = '<span style="color:var(--warn)">Another run is in progress.</span>';
+      return;
+    }
     agentOut.innerHTML = d.error
       ? '<span style="color:var(--bad)">' + d.error + '</span>'
       : (d.scripted ? '<span class="pill warn">SCRIPTED</span> ' : '')
         + d.text + '<br><span style="opacity:.6">tools: ' + (d.toolCalls||[]).join(' → ') + '</span>';
-  } catch (e) { agentOut.textContent = String(e); }
-  agentBtn.disabled = false;
-  refresh();
+  } catch (e) {
+    agentOut.innerHTML = '<span style="color:var(--bad)">'
+      + (e.name === 'TimeoutError' ? 'Agent run timed out after 3 minutes.' : String(e)) + '</span>';
+  } finally {
+    clearInterval(tick);
+    agentBtn.disabled = false;
+    refresh();
+  }
 };
 
 fetch('/api/onboarding').then(r=>r.json()).then(d=>{ onboarding = d; });

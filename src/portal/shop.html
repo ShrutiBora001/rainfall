@@ -97,20 +97,44 @@ function checkout(sku){
 }
 
 async function buy(sku, label){
-  if (busy) return;
+  if (busy) { status.textContent = 'The agent is already working — one run at a time.'; return; }
   busy = true;
-  status.textContent = `Asking the agent to buy the ${label}…`;
-  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
+
+  // An agent run takes 20-40s. Without a ticking clock the button reads as
+  // broken, which is what "it gets stuck" actually was.
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    status.textContent = `Agent working on the ${label}… ${((Date.now()-t0)/1000).toFixed(0)}s`;
+  }, 250);
+
+  // Disable only the shelf buttons. Disabling every .btn on the page stranded
+  // the merchandiser button, which refresh() never re-creates.
+  const shelfBtns = [...shelf.querySelectorAll('.btn')];
+  shelfBtns.forEach(b => b.disabled = true);
+
   try{
     const goal = `A customer wants the ${label}. Check what credit terms you can get for it, and buy it if the terms are acceptable.`;
-    const r = await fetch('/api/agent?sku='+encodeURIComponent(sku)+'&goal='+encodeURIComponent(goal));
+    const r = await fetch('/api/agent?sku='+encodeURIComponent(sku)+'&goal='+encodeURIComponent(goal),
+      { signal: AbortSignal.timeout(180000) });
     const d = await r.json();
-    status.innerHTML = d.error
-      ? '<span style="color:var(--bad)">'+d.error+'</span>'
-      : (d.scripted?'<span class="pill warn">SCRIPTED</span> ':'') + d.text;
-  }catch(e){ status.textContent = String(e); }
-  busy = false;
-  refresh();
+    if (r.status === 409) {
+      status.innerHTML = '<span style="color:var(--warn)">Another agent run is in progress — wait for it to finish.</span>';
+    } else if (d.error) {
+      status.innerHTML = '<span style="color:var(--bad)">'+d.error+'</span>';
+    } else {
+      status.innerHTML = (d.scripted?'<span class="pill warn">SCRIPTED</span> ':'') + d.text
+        + `<div class="sub" style="margin-top:6px">tools: ${(d.toolCalls||[]).join(' → ')}`
+        + (d.usage ? ` · $${d.usage.costUsd.toFixed(4)}` : '') + `</div>`;
+    }
+  }catch(e){
+    status.innerHTML = '<span style="color:var(--bad)">'
+      + (e.name === 'TimeoutError' ? 'Agent run timed out after 3 minutes.' : String(e)) + '</span>';
+  } finally {
+    clearInterval(tick);
+    shelfBtns.forEach(b => b.disabled = false);
+    busy = false;
+    refresh();
+  }
 }
 
 async function refresh(){

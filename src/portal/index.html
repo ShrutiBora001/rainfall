@@ -60,6 +60,9 @@
   table.sched tr.paid td{color:var(--dim)}
   table.sched tr.due td{color:var(--ink);font-weight:550}
   .num{font-variant-numeric:tabular-nums}
+  .rowbtn{background:#1d2635;color:var(--ink);border:1px solid #2b3648;border-radius:7px;
+          padding:5px 10px;font-size:11.5px;cursor:pointer;font-weight:550;white-space:nowrap}
+  .rowbtn:hover{background:#26324a;border-color:var(--accent)}
   .goal{flex:1;min-width:280px;background:#0c1119;border:1px solid var(--line);
         border-radius:9px;padding:10px 12px;color:var(--ink);font-size:13px;
         font-family:inherit}
@@ -214,17 +217,26 @@ async function renderSchedule(id){
     const canAct = d.status==='Active';
     schedule.innerHTML = `
       <table class="sched">
-        <tr><th>#</th><th>due</th><th>principal</th><th>interest</th><th>total</th><th></th></tr>
+        <tr><th>#</th><th>due</th><th>principal</th><th>interest</th><th>total</th><th></th><th></th></tr>
         ${d.rows.map(r=>{
           const t = r.dueAt - state.now;
           const when = r.status==='paid' ? 'paid'
             : t>0 ? 'in '+t+'s' : (r.status==='due' ? (d.overdue?'past grace':'due now') : '—');
+          // Each unpaid row can be settled on its own. A later row pays every
+          // installment up to and including it, because the contract always
+          // clears the next unpaid one.
+          const ahead = r.n - d.paid;
+          const act = canAct && r.status !== 'paid' && r.status !== 'defaulted'
+            ? `<button class="rowbtn" onclick="call('/api/pay?id=${d.id}&count=${ahead}')">${
+                ahead === 1 ? 'Pay' : 'Pay through #' + r.n}</button>`
+            : '';
           return `<tr class="${r.status}">
             <td class="num">${r.n}</td><td class="sub">${when}</td>
             <td class="num">${c2(r.principalCents)}</td>
             <td class="num">${c2(r.interestCents)}</td>
             <td class="num">${c2(r.totalCents)}</td>
             <td><span class="pill ${r.status==='paid'?'ok':r.status==='defaulted'?'bad':r.status==='due'?'warn':''}">${r.status}</span></td>
+            <td style="text-align:right">${act}</td>
           </tr>`;
         }).join('')}
       </table>
@@ -232,6 +244,11 @@ async function renderSchedule(id){
         <div><div class="sub">outstanding</div><div style="font-size:20px;font-weight:600">${c2(d.outstandingCents)}</div></div>
         <button class="btn" ${canAct?'':'disabled'} onclick="call('/api/payoff?id=${d.id}')">
           Settle early · ${c2(d.outstandingCents)}</button>
+      </div>
+      <div class="sub" style="margin-top:8px">
+        Pay one installment, or pay ahead through any row. Paying ahead clears the debt,
+        but installments inside one seasoning window count once toward the ladder —
+        standing is earned over time, not bought in a burst.
       </div>`;
   }catch(e){ schedule.innerHTML = '<div class="sub">'+e+'</div>'; }
 }

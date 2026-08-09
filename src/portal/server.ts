@@ -117,7 +117,8 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/pay') {
-      await svc.pay(Number(url.searchParams.get('id')));
+      const count = Number(url.searchParams.get('count') ?? 1);
+      await svc.pay(Number(url.searchParams.get('id')), Number.isFinite(count) ? count : 1);
       return json(200, { ok: true });
     }
 

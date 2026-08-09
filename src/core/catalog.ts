@@ -43,7 +43,19 @@ const MERCHANT_POOL: `0x${string}`[] = [
   '0x976EA74026E726554dB657fA54763abd0C3a0aa9',
 ];
 
+/**
+ * An existing merchant keeps the address it already trades under. Hashing the
+ * name unconditionally gave a sourced "Corso Cycles" item a different address
+ * from the seeded Corso bikes, so its sales paid one address while the
+ * merchant ledger displayed the balance of the other — the shop appeared to
+ * have earned nothing.
+ */
 export function addressForMerchant(name: string): `0x${string}` {
+  const known = catalog
+    ?.list()
+    .find((i) => i.merchant.toLowerCase() === name.toLowerCase());
+  if (known) return known.merchantAddress;
+
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return MERCHANT_POOL[h % MERCHANT_POOL.length];

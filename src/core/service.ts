@@ -310,10 +310,33 @@ export class RainfallService {
     return { approved: true, id, reason: a.reason };
   }
 
-  async pay(id: number): Promise<void> {
-    await this.send(this.dep.contracts.InstallmentAgreement, agreementAbi, 'pay', [BigInt(id)]);
-    const a = await this.agr.read.agreementOf([BigInt(id)]);
-    this.say('pay', `#${id} installment ${a.paid}/${a.installments} paid`);
+  /**
+   * Pay one installment, or several at once.
+   *
+   * The contract always clears the next unpaid installment, so paying ahead is
+   * a sequence of ordinary payments rather than a special case. Each is a
+   * separate repayment on the agent's record — and because they land inside one
+   * seasoning window, they clear the debt but only one of them advances the
+   * ladder. That is the intended behaviour, not a limitation: standing is
+   * earned over time, not bought in a burst.
+   */
+  async pay(id: number, count = 1): Promise<void> {
+    const n = Math.max(1, Math.min(Math.floor(count), 12));
+    for (let k = 0; k < n; k++) {
+      const before = await this.agr.read.agreementOf([BigInt(id)]);
+      if (before.status !== 1) break; // settled or delinquent mid-run
+      await this.send(this.dep.contracts.InstallmentAgreement, agreementAbi, 'pay', [BigInt(id)]);
+      const a = await this.agr.read.agreementOf([BigInt(id)]);
+      this.say('pay', `#${id} installment ${a.paid}/${a.installments} paid`);
+    }
+    if (n > 1) {
+      const seasoned = await this.score.read.seasonedOf([this.agent]);
+      this.say(
+        'info',
+        `${n} installments cleared · ${seasoned} counted toward the ladder ` +
+          `(one per seasoning window)`,
+      );
+    }
     await this.syncCollateral();
   }
 
@@ -745,15 +768,26 @@ export class RainfallService {
  * addresses; nothing of value is ever held by them -- the agent key only needs
  * to be a stable identifier the registry can bind to a principal.
  */
+/**
+ * These must not overlap MERCHANT_POOL in catalog.ts. They did: rotating put
+ * the agent onto Voltmart's own address, so the agent became its own merchant
+ * and inherited that address's history — a fresh identity that opened at 340
+ * and could buy nothing.
+ *
+ * Only the first is an anvil test account; the rest are arbitrary. An agent key
+ * is never used to sign here — the registry only needs a stable identifier —
+ * so any distinct address works, and being obviously synthetic makes the
+ * separation from the merchant addresses visible at a glance.
+ */
 const AGENT_POOL: `0x${string}`[] = [
   '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
-  '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-  '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
-  '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
-  '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
-  '0x976EA74026E726554dB657fA54763abd0C3a0aa9',
-  '0x14dC79964da2C08b23698B3D3cc7Ca32193d9955',
-  '0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f',
+  '0xA6E70000000000000000000000000000000000A1',
+  '0xA6E70000000000000000000000000000000000A2',
+  '0xA6E70000000000000000000000000000000000A3',
+  '0xA6E70000000000000000000000000000000000A4',
+  '0xA6E70000000000000000000000000000000000A5',
+  '0xA6E70000000000000000000000000000000000A6',
+  '0xA6E70000000000000000000000000000000000A7',
 ];
 
 export const usd = (cents: Cents): string =>

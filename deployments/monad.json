@@ -1,0 +1,14 @@
+{
+  "chainId": 10143,
+  "contracts": {
+    "AgentRegistry": "0x42A27Ae62485eD1D064196beAF4d8B8ca87291b3",
+    "CreditScore": "0xb0cAFDC46a6b175a50FA03b22f3EFd82aBdCde26",
+    "InstallmentAgreement": "0xa8E2C0DFc1FD9D2c44EC9388C11Dd2460aa7ED70",
+    "LiquidityPool": "0xDD4c0b394D998B5a2d09971e0C94F6974FE984Db",
+    "MockUSDC": "0x4C1725B9ac75989630EDAe6c2405b28D07235210",
+    "Underwriter": "0x8B63AfEEa201d3502FE6ddF54a9f3A23204DcBf8"
+  },
+  "deployer": "0x428581f8f49585bEA0E4e65F74AebF188D275b40",
+  "label": "Monad testnet",
+  "rpc": "https://testnet-rpc.monad.xyz"
+}

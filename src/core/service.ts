@@ -52,9 +52,25 @@ export class RainfallService {
       name: this.dep.label,
       nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
       rpcUrls: { default: { http: [this.dep.rpc] } },
+      // viem only batches reads if it knows where Multicall3 is. Without this
+      // the `batch.multicall` option below silently does nothing and every
+      // read goes out as its own eth_call. Deployed at the canonical address
+      // on both Monad and anvil.
+      contracts: {
+        multicall3: { address: '0xcA11bde05977b3631167028862bE2a173976CA11' as const },
+      },
     } as const;
 
-    this.pub = createPublicClient({ chain, transport: http(this.dep.rpc) });
+    // A public RPC will not tolerate the read burst `state()` produces — a
+    // dozen-plus eth_calls every poll. Multicall3 is deployed on Monad at the
+    // canonical address, so batch them into one request instead.
+    this.pub = createPublicClient({
+      chain,
+      transport: http(this.dep.rpc, { batch: true }),
+      // A wider window groups more reads into one multicall. The public Monad
+      // RPC caps at 15 requests/sec, and `state()` alone issues more than that.
+      batch: { multicall: { wait: 60 } },
+    });
 
     // Anvil account 0 unless overridden. On Monad testnet, set PORTAL_PRIVATE_KEY.
     const pk = (process.env.PORTAL_PRIVATE_KEY ??
@@ -439,11 +455,9 @@ export class RainfallService {
 
   async activeIds(): Promise<number[]> {
     const next = Number(await this.agr.read.nextId());
-    const ids: number[] = [];
-    for (let i = 1; i < next; i++) {
-      if ((await this.agr.read.statusOf([BigInt(i)])) === 1) ids.push(i);
-    }
-    return ids;
+    const all = Array.from({ length: next - 1 }, (_, i) => i + 1);
+    const statuses = await Promise.all(all.map((i) => this.agr.read.statusOf([BigInt(i)])));
+    return all.filter((_, k) => statuses[k] === 1);
   }
 
   /** Jump past the due date so delinquency can be demonstrated on cue. */
@@ -502,7 +516,37 @@ export class RainfallService {
 
   // ---- reads ----
 
-  async state() {
+  /**
+   * The portal polls this on a timer and two pages may be open at once. Against
+   * a public RPC capped at 15 requests/sec that is enough to rate-limit
+   * ourselves, so serve a briefly cached snapshot and coalesce concurrent
+   * callers onto one in-flight read.
+   */
+  private stateCache: { at: number; data: unknown } | null = null;
+  private stateInFlight: Promise<any> | null = null;
+  /** Local anvil can be polled hard; a public RPC cannot. */
+  private get stateTtlMs(): number {
+    return this.dep.chainId === 31337 ? 250 : 1500;
+  }
+
+  async state(): Promise<any> {
+    const now = Date.now();
+    if (this.stateCache && now - this.stateCache.at < this.stateTtlMs) {
+      return this.stateCache.data;
+    }
+    if (this.stateInFlight) return this.stateInFlight;
+    this.stateInFlight = this.readState()
+      .then((d) => {
+        this.stateCache = { at: Date.now(), data: d };
+        return d;
+      })
+      .finally(() => {
+        this.stateInFlight = null;
+      });
+    return this.stateInFlight;
+  }
+
+  private async readState() {
     const [bps, limit, sc, rec, nextId, poolAssets, deployed, toNextTier, seasoning] =
       await Promise.all([
         this.score.read.requiredCollateralBps([this.agent]),
@@ -516,28 +560,41 @@ export class RainfallService {
         this.score.read.seasoningPeriod(),
       ]);
 
-    const agreements = [];
-    for (let i = 1; i < Number(nextId); i++) {
-      const a = await this.agr.read.agreementOf([BigInt(i)]);
-      agreements.push({
-        id: i,
-        merchant: a.merchant,
-        principal: a.principal.toString(),
-        installmentAmount: a.installmentAmount.toString(),
-        installments: a.installments,
-        paid: a.paid,
-        collateralBps: a.collateralBps,
-        nextDueAt: Number(a.nextDueAt),
-        status: ['None', 'Active', 'Settled', 'Delinquent'][a.status],
-        overdue: await this.agr.read.isDelinquent([BigInt(i)]),
-        late: await this.agr.read.isLate([BigInt(i)]),
-        cardId: this.cards.get(i) ?? null,
-      });
-    }
+    // Every read below must be issued concurrently or multicall has nothing to
+    // batch -- sequential awaits become sequential eth_calls, which is what
+    // rate-limits a public RPC.
+    const ids = Array.from({ length: Number(nextId) - 1 }, (_, i) => i + 1);
+    const agreements = await Promise.all(
+      ids.map(async (i) => {
+        const [a, overdue, late] = await Promise.all([
+          this.agr.read.agreementOf([BigInt(i)]),
+          this.agr.read.isDelinquent([BigInt(i)]),
+          this.agr.read.isLate([BigInt(i)]),
+        ]);
+        return {
+          id: i,
+          merchant: a.merchant,
+          principal: a.principal.toString(),
+          installmentAmount: a.installmentAmount.toString(),
+          installments: a.installments,
+          paid: a.paid,
+          collateralBps: a.collateralBps,
+          nextDueAt: Number(a.nextDueAt),
+          status: ['None', 'Active', 'Settled', 'Delinquent'][a.status],
+          overdue,
+          late,
+          cardId: this.cards.get(i) ?? null,
+        };
+      }),
+    );
 
+    const items = catalogList();
+    const assessed = await Promise.all(
+      items.map((item) => this.uw.read.assess([this.agent, centsToUnits(item.cents)])),
+    );
     const quotes: Record<string, unknown> = {};
-    for (const item of catalogList()) {
-      const a = await this.uw.read.assess([this.agent, centsToUnits(item.cents)]);
+    items.forEach((item, k) => {
+      const a = assessed[k];
       quotes[item.sku] = {
         ...item,
         approved: a.approved,
@@ -546,7 +603,7 @@ export class RainfallService {
         installments: a.installments,
         aprBps: a.aprBps,
       };
-    }
+    });
 
     return {
       now: Number((await this.pub.getBlock()).timestamp),
@@ -601,7 +658,7 @@ export class RainfallService {
     );
 
     const s = await this.state();
-    const orders = s.agreements.map((a) => {
+    const orders = s.agreements.map((a: any) => {
       const item = catalogList().find(
         (i) => i.merchantAddress.toLowerCase() === a.merchant.toLowerCase(),
       );

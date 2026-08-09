@@ -121,7 +121,7 @@ async function runTool(
     case 'list_obligations': {
       const s = await svc.state();
       return JSON.stringify(
-        s.agreements.map((a) => ({
+        s.agreements.map((a: any) => ({
           id: a.id,
           status: a.status,
           paid: `${a.paid}/${a.installments}`,

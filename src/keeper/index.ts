@@ -79,7 +79,7 @@ export class Keeper {
   /** Due once the installment's cadence has elapsed, before grace expires. */
   private async isDue(id: number): Promise<boolean> {
     const s = await this.svc.state();
-    const a = s.agreements.find((x) => x.id === id);
+    const a = s.agreements.find((x: any) => x.id === id);
     return !!a && a.status === 'Active' && s.now >= a.nextDueAt;
   }
 }

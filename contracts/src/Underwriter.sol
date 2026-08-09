@@ -90,19 +90,46 @@ contract Underwriter is Auth {
         a.reason = "approved";
     }
 
-    /// @notice Assess and, if approved, open the agreement. Called by the
-    /// authorization handler once Rain reports the card cleared.
+    uint16 public constant MIN_PLAN = 2;
+    uint16 public constant MAX_PLAN = 12;
+
+    error BadPlan(uint16 installments);
+
+    /// @notice Assess and, if approved, open the agreement on the default plan.
     function authorize(address agent, address merchant, uint256 amount)
         external
         onlyAuthorized
         returns (uint256 id, Assessment memory a)
     {
+        return _authorize(agent, merchant, amount, installments);
+    }
+
+    /// @notice Same, but on a plan the buyer chose at checkout. Every real
+    /// installment product lets you pick the term; the underwriter still
+    /// decides whether you get credit at all.
+    function authorizeWithPlan(
+        address agent,
+        address merchant,
+        uint256 amount,
+        uint16 planInstallments
+    ) external onlyAuthorized returns (uint256 id, Assessment memory a) {
+        if (planInstallments < MIN_PLAN || planInstallments > MAX_PLAN) {
+            revert BadPlan(planInstallments);
+        }
+        return _authorize(agent, merchant, amount, planInstallments);
+    }
+
+    function _authorize(address agent, address merchant, uint256 amount, uint16 plan)
+        private
+        returns (uint256 id, Assessment memory a)
+    {
         a = assess(agent, amount);
+        a.installments = plan;
         emit Assessed(agent, amount, a.approved, a.requiredCollateralBps);
         if (!a.approved) revert NotApproved(a.reason);
 
         id = agreements.open(
-            agent, merchant, amount, a.installments, a.aprBps, a.requiredCollateralBps, cadence
+            agent, merchant, amount, plan, a.aprBps, a.requiredCollateralBps, cadence
         );
     }
 

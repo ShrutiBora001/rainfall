@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Checkout — Voltmart &amp; Corso</title>
+<style>
+  :root{
+    --bg:#0a0d12; --panel:#121721; --line:#1e2633; --ink:#e8edf5; --dim:#8697ad;
+    --ok:#3ddc97; --warn:#ffb454; --bad:#ff5c7a; --accent:#5aa9ff;
+    font-family: ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:22px 26px;max-width:1100px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  h1{font-size:24px;margin:0;letter-spacing:-.4px}
+  a{color:var(--accent);text-decoration:none;font-size:13px}
+  .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);padding:3px 9px;border-radius:999px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);margin-bottom:12px}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;
+       border-bottom:1px solid var(--line);font-size:14px;align-items:center}
+  .row:last-child{border-bottom:0}
+  .sub{font-size:12px;color:var(--dim)}
+  .art{font-size:28px}
+  .plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .plan{background:#0c1119;border:1.5px solid var(--line);border-radius:12px;padding:14px;
+        cursor:pointer;transition:border-color .15s}
+  .plan:hover{border-color:#3a4759}
+  .plan.sel{border-color:var(--accent);background:#131c2b}
+  .plan .per{font-size:21px;font-weight:650;letter-spacing:-.5px}
+  .plan .n{font-size:12px;color:var(--dim);margin-bottom:6px}
+  .plan .tot{font-size:11.5px;color:var(--dim);margin-top:6px}
+  .btn{background:var(--accent);color:#04101f;border:0;border-radius:10px;padding:13px 18px;
+       font-size:14px;font-weight:650;cursor:pointer}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.ghost{background:#1d2635;color:var(--ink);border:1px solid #2b3648}
+  .pill{font-size:10.5px;padding:3px 8px;border-radius:999px;font-weight:650}
+  .pill.ok{background:rgba(61,220,151,.14);color:var(--ok)}
+  .pill.bad{background:rgba(255,92,122,.14);color:var(--bad)}
+  .big{font-size:28px;font-weight:650;letter-spacing:-.8px}
+  .num{font-variant-numeric:tabular-nums}
+  .decline{background:rgba(255,92,122,.08);border:1px solid rgba(255,92,122,.3);
+           border-radius:10px;padding:14px;font-size:13.5px;color:var(--bad)}
+  #result{margin-top:14px;font-size:13.5px;min-height:20px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Checkout</h1>
+  <span class="tag">installments by Rainfall</span>
+  <a href="/shop">← back to shop</a>
+  <a href="/">agent portal</a>
+</header>
+
+<div class="panel">
+  <div class="label">Your cart</div>
+  <div id="cart"><div class="sub">cart is empty</div></div>
+</div>
+
+<div class="panel" id="creditPanel">
+  <div class="label">Credit decision — live from Monad</div>
+  <div id="credit"><div class="sub">checking…</div></div>
+</div>
+
+<div class="panel" id="planPanel">
+  <div class="label">Choose your plan</div>
+  <div class="plans" id="plans"></div>
+  <div class="row" style="margin-top:16px">
+    <div>
+      <div class="sub">total payable</div>
+      <div class="big num" id="total">—</div>
+      <div class="sub" id="interest"></div>
+    </div>
+    <button class="btn" id="pay">Have the agent pay</button>
+  </div>
+  <div id="result"></div>
+</div>
+
+<script>
+const usd = c => '$' + (Number(c)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const cart = JSON.parse(sessionStorage.getItem('cart') || '[]');
+let data = null, chosen = null;
+
+async function load(){
+  if (!cart.length){
+    cart_.innerHTML = '<div class="sub">cart is empty — <a href="/shop">go to the shop</a></div>';
+    creditPanel.style.display = planPanel.style.display = 'none';
+    return;
+  }
+  // One line item per checkout keeps the credit decision unambiguous.
+  const sku = cart[0];
+  data = await fetch('/api/plans?sku='+encodeURIComponent(sku)).then(r=>r.json());
+
+  document.getElementById('cart').innerHTML = `
+    <div class="row">
+      <div style="display:flex;gap:12px;align-items:center">
+        <span class="art">${data.item.art}</span>
+        <div><div>${data.item.label}</div>
+          <div class="sub">${data.item.merchant} · MCC ${data.item.mcc} — ${data.item.mccLabel}</div></div>
+      </div>
+      <div class="big num">${usd(data.item.cents)}</div>
+    </div>`;
+
+  document.getElementById('credit').innerHTML = data.approved
+    ? `<div class="row">
+         <div><span class="pill ok">APPROVED</span>
+           <div class="sub" style="margin-top:6px">credit limit ${usd(data.creditLimitCents)}
+             · ${data.requiredCollateralBps/100}% collateral required
+             · ${data.aprBps/100}% APR</div></div>
+       </div>`
+    : `<div class="decline"><b>Declined — ${data.reason}.</b><br>
+        <span style="color:var(--dim)">Credit limit is ${usd(data.creditLimitCents)}.
+        Choosing a longer plan will not change this: the term is the buyer's choice,
+        but whether credit is extended at all is the underwriter's.</span></div>`;
+
+  if (!data.approved){ planPanel.style.display = 'none'; return; }
+
+  chosen = data.plans.find(p=>p.installments===4) ?? data.plans[0];
+  renderPlans();
+}
+
+function renderPlans(){
+  document.getElementById('plans').innerHTML = data.plans.map(p=>`
+    <div class="plan ${chosen.installments===p.installments?'sel':''}" onclick="pick(${p.installments})">
+      <div class="n">${p.installments} installments</div>
+      <div class="per num">${usd(p.perInstallmentCents)}</div>
+      <div class="tot">total ${usd(p.totalCents)}</div>
+    </div>`).join('');
+  document.getElementById('total').textContent = usd(chosen.totalCents);
+  document.getElementById('interest').textContent =
+    `${usd(chosen.interestCents)} interest at ${data.aprBps/100}% APR · flat, not reducing-balance`;
+}
+
+function pick(n){ chosen = data.plans.find(p=>p.installments===n); renderPlans(); }
+
+document.getElementById('pay').onclick = async ()=>{
+  const btn = document.getElementById('pay');
+  btn.disabled = true; btn.textContent = 'Agent working…';
+  result.innerHTML = '<span class="sub">underwriting, issuing a scoped card, opening the obligation…</span>';
+  try{
+    const goal = `A customer is checking out the ${data.item.label} at ${usd(data.item.cents)} `
+      + `on a ${chosen.installments}-installment plan. Check the terms and complete the purchase if acceptable.`;
+    const r = await fetch('/api/agent?sku='+encodeURIComponent(data.item.sku)
+      + '&installments='+chosen.installments + '&goal='+encodeURIComponent(goal)).then(r=>r.json());
+    result.innerHTML = r.error
+      ? '<span style="color:var(--bad)">'+r.error+'</span>'
+      : `<span class="pill ok">ORDER PLACED</span> ${r.scripted?'<span class="pill bad">SCRIPTED AGENT</span> ':''}
+         <div style="margin-top:8px">${r.text}</div>
+         <div class="sub" style="margin-top:6px">tools: ${(r.toolCalls||[]).join(' → ')}</div>
+         <div style="margin-top:10px"><a href="/">track repayment in the agent portal →</a></div>`;
+    sessionStorage.removeItem('cart');
+  }catch(e){ result.innerHTML = '<span style="color:var(--bad)">'+e+'</span>'; }
+  btn.disabled = false; btn.textContent = 'Have the agent pay';
+};
+
+const cart_ = document.getElementById('cart');
+load();
+</script>
+</body>
+</html>

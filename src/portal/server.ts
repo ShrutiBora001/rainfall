@@ -54,8 +54,21 @@ const server = createServer(async (req, res) => {
       return json(200, { ok: true });
     }
 
+    if (url.pathname === '/checkout') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return res.end(page('checkout.html'));
+    }
+
+    if (url.pathname === '/api/plans') {
+      return json(200, await svc.planOptions(url.searchParams.get('sku') ?? 'phone'));
+    }
+
     if (url.pathname === '/api/buy') {
-      return json(200, await svc.buy(url.searchParams.get('sku') ?? 'phone'));
+      const n = url.searchParams.get('installments');
+      return json(
+        200,
+        await svc.buy(url.searchParams.get('sku') ?? 'phone', n ? Number(n) : undefined),
+      );
     }
 
     if (url.pathname === '/api/onboarding') return json(200, await svc.onboarding());
@@ -87,11 +100,16 @@ const server = createServer(async (req, res) => {
       const goal =
         url.searchParams.get('goal') ??
         'You need a phone for a new hire. Find one, check what credit terms you can get, and buy it if the terms are acceptable.';
+      const n = url.searchParams.get('installments');
       agentBusy = true;
       try {
         const out = agentLive
           ? await runAgent(svc, goal)
-          : await runScriptedAgent(svc, url.searchParams.get('sku') ?? 'phone');
+          : await runScriptedAgent(
+              svc,
+              url.searchParams.get('sku') ?? 'phone',
+              n ? Number(n) : undefined,
+            );
         return json(200, { ...out, scripted: !agentLive });
       } finally {
         agentBusy = false;

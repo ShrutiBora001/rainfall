@@ -22,6 +22,7 @@ export const underwriterAbi = parseAbi([
   'function assess(address agent, uint256 amount) view returns ((bool approved,uint16 installments,uint16 aprBps,uint16 requiredCollateralBps,uint256 creditLimit,string reason))',
   'function canAfford(address agent, uint256 amount) view returns (bool)',
   'function authorize(address agent, address merchant, uint256 amount) returns (uint256, (bool,uint16,uint16,uint16,uint256,string))',
+  'function authorizeWithPlan(address agent, address merchant, uint256 amount, uint16 planInstallments) returns (uint256, (bool,uint16,uint16,uint16,uint256,string))',
   'function setTerms(uint16 installments, uint16 aprBps, uint64 cadence)',
 ]);
 

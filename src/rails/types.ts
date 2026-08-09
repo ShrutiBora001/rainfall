@@ -26,6 +26,8 @@ export interface CardHandle {
   cardId: string;
   last4: string;
   status: CardStatus;
+  /** Current spend ceiling, when the rails report one. */
+  limitCents?: Cents | null;
 }
 
 export type CardStatus = 'active' | 'frozen' | 'revoked';
@@ -66,6 +68,13 @@ export interface CardRails {
    * Collateral contract — the seam where the underwriting ladder stops being
    * a number on a dashboard and becomes the principal's capital moving.
    */
+  /**
+   * Move a card's spend ceiling. On live Rain this is where the underwriting
+   * ladder actually executes — the collateral routes are 403 for our key, but
+   * the spend limit is ours to move.
+   */
+  setSpendLimit(cardId: string, cents: Cents): Promise<void>;
+
   getCollateral(contractId: string): Promise<CollateralState>;
   setRequiredCollateral(contractId: string, ratioBps: number): Promise<void>;
   claimCollateral(contractId: string, amountCents: Cents): Promise<void>;

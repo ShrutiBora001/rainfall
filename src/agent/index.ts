@@ -47,10 +47,16 @@ const tools: Anthropic.Tool[] = [
   {
     name: 'purchase',
     description:
-      'Buy an item on installment credit. Issues a scoped card and opens the obligation on-chain. Fails if the underwriter declines.',
+      'Buy an item on installment credit. Issues a scoped card and opens the obligation on-chain. Fails if the underwriter declines. Optionally choose how many installments to spread it over (2-12); omit to take the default plan.',
     input_schema: {
       type: 'object',
-      properties: { sku: { type: 'string' } },
+      properties: {
+        sku: { type: 'string' },
+        installments: {
+          type: 'integer',
+          description: 'Number of installments, 2 to 12. A longer plan lowers each payment but does not raise your credit limit.',
+        },
+      },
       required: ['sku'],
     },
   },
@@ -104,7 +110,7 @@ async function runTool(
     }
 
     case 'purchase': {
-      const r = await svc.buy(input.sku);
+      const r = await svc.buy(input.sku, input.installments);
       return JSON.stringify(
         r.approved
           ? { purchased: true, obligationId: r.id }
@@ -224,6 +230,7 @@ export async function runAgent(
 export async function runScriptedAgent(
   svc: RainfallService,
   sku: string,
+  installments?: number,
 ): Promise<AgentTurn> {
   const toolCalls: string[] = ['search_catalog', 'check_credit'];
   svc.say('agent', `[scripted] evaluating ${sku}`);
@@ -233,9 +240,10 @@ export async function runScriptedAgent(
     return { text: `Declined: ${q.reason}`, toolCalls };
   }
   toolCalls.push('purchase');
-  const r = await svc.buy(sku);
+  const r = await svc.buy(sku, installments);
+  const n = installments ?? q.installments;
   return {
-    text: r.approved ? `Bought ${q.item.label} on ${q.installments} installments.` : r.reason,
+    text: r.approved ? `Bought ${q.item.label} on ${n} installments.` : r.reason,
     toolCalls,
   };
 }

@@ -74,6 +74,7 @@ export class RainfallService {
         ? new RainRails({
             apiKey: process.env.RAIN_API_KEY!,
             baseUrl: process.env.RAIN_BASE_URL,
+            userId: process.env.RAIN_USER_ID!,
             collateralContractId: this.collateralId,
           })
         : new MockRails({ contractId: this.collateralId, startingCollateralCents: 250_000 });
@@ -133,6 +134,7 @@ export class RainfallService {
       centsToUnits(9_000_000),
     ]);
     await this.rails.setRequiredCollateral(this.collateralId, 10_000).catch(() => {});
+    await this.ensureStandingCard();
     this.say('ok', `agent ${this.agent.slice(0, 8)} registered, principal funded`);
   }
 
@@ -144,7 +146,36 @@ export class RainfallService {
     return { item, ...a };
   }
 
-  async buy(sku: string): Promise<{ approved: boolean; id?: number; reason: string }> {
+  /**
+   * Plan options for checkout. The underwriter decides *whether* credit is
+   * extended; the buyer picks the term. Both matter, and they are separate
+   * questions -- stretching a plan never makes an over-limit purchase clear.
+   */
+  async planOptions(sku: string) {
+    const item = findItem(sku);
+    if (!item) throw new Error(`unknown sku: ${sku}`);
+    const a = await this.uw.read.assess([this.agent, centsToUnits(item.cents)]);
+    const total = Math.round(item.cents * (1 + a.aprBps / 10_000));
+    return {
+      item,
+      approved: a.approved,
+      reason: a.reason,
+      requiredCollateralBps: a.requiredCollateralBps,
+      aprBps: a.aprBps,
+      creditLimitCents: Number(a.creditLimit / 10_000n),
+      plans: [2, 3, 4, 6].map((n) => ({
+        installments: n,
+        perInstallmentCents: Math.round(total / n),
+        totalCents: total,
+        interestCents: total - item.cents,
+      })),
+    };
+  }
+
+  async buy(
+    sku: string,
+    installments?: number,
+  ): Promise<{ approved: boolean; id?: number; reason: string }> {
     const item = findItem(sku);
     if (!item) throw new Error(`unknown sku: ${sku}`);
     const amount = centsToUnits(item.cents);
@@ -168,11 +199,18 @@ export class RainfallService {
       `Rain card ${card.last4} scoped to ${item.merchant} for ${usd(item.cents)}`,
     );
 
-    const receipt = await this.send(this.dep.contracts.Underwriter, underwriterAbi, 'authorize', [
-      this.agent,
-      item.merchantAddress,
-      amount,
-    ]);
+    const receipt = installments
+      ? await this.send(this.dep.contracts.Underwriter, underwriterAbi, 'authorizeWithPlan', [
+          this.agent,
+          item.merchantAddress,
+          amount,
+          installments,
+        ])
+      : await this.send(this.dep.contracts.Underwriter, underwriterAbi, 'authorize', [
+          this.agent,
+          item.merchantAddress,
+          amount,
+        ]);
     const id = Number(await this.agr.read.nextId()) - 1;
     this.cards.set(id, card.cardId);
 
@@ -202,8 +240,62 @@ export class RainfallService {
       await this.rails.setRequiredCollateral(this.collateralId, bps);
       this.say('collateral', `required collateral now ${bps / 100}% — Rain updated`);
     } catch (e) {
-      this.say('warn', `collateral update failed: ${(e as Error).message}`);
+      // Expected on live Rain: the collateral routes are 403 for this key. The
+      // ratio is authoritative on Monad either way; only the mirror is missing.
+      const msg = (e as Error).message;
+      this.say(
+        'collateral',
+        msg.includes('403')
+          ? `required collateral now ${bps / 100}% — mirrored on Monad (Rain collateral scope unavailable)`
+          : `collateral update failed: ${msg}`,
+      );
     }
+    await this.syncStandingCard();
+  }
+
+  /**
+   * The half of the ladder that genuinely executes on Rain. Collateral is
+   * gated, but the card's spend ceiling is not -- so as standing rises on
+   * Monad, the amount this agent's card may authorize rises with it, on Rain's
+   * own infrastructure. Verifiable with a GET against their API.
+   */
+  private standingCardId: string | null = null;
+
+  async ensureStandingCard(): Promise<string | null> {
+    if (this.standingCardId) return this.standingCardId;
+    try {
+      const limit = await this.score.read.creditLimit([this.agent]);
+      const card = await this.rails.issueScopedCard({
+        merchant: 'rainfall-standing',
+        mcc: '0000',
+        amountCents: Number(limit / 10_000n),
+        expiresAt: new Date(Date.now() + 365 * 24 * 3600_000),
+        agentId: this.agent,
+      });
+      this.standingCardId = card.cardId;
+      this.say('card', `standing card ${card.last4} issued — limit tracks the ladder`);
+      return card.cardId;
+    } catch (e) {
+      this.say('warn', `standing card unavailable: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  async syncStandingCard(): Promise<void> {
+    const id = this.standingCardId;
+    if (!id) return;
+    const limit = Number((await this.score.read.creditLimit([this.agent])) / 10_000n);
+    try {
+      await this.rails.setSpendLimit(id, limit);
+      this.say('limit', `Rain card spend limit set to ${usd(limit)} — matches the ladder`);
+    } catch (e) {
+      this.say('warn', `spend limit update failed: ${(e as Error).message}`);
+    }
+  }
+
+  async standingCard() {
+    if (!this.standingCardId) return null;
+    return this.rails.getCard(this.standingCardId).catch(() => null);
   }
 
   /** Settle the remaining balance in one payment. */

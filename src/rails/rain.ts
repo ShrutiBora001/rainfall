@@ -12,32 +12,40 @@ import {
 /**
  * Live Rain rails.
  *
- * Confirmed by probing the API directly (docs.rain.xyz is access-code gated):
- *   - base https://api.rain.xyz, Fastify, /v1/*, 1000 req rate limit
- *   - auth header is `api-key`, NOT `Authorization: Bearer`
- *   - real routes: /v1/cards, /v1/issuing/cards, /v1/transactions
- *   - /v1/collateral-contracts is NOT a route; the collateral path is unknown
+ * Every route and field below was established by probing the sandbox directly
+ * (docs.rain.xyz is access-code gated) and confirmed by creating real cards:
  *
- * Anything below marked UNVERIFIED is a guess at the shape and must be checked
- * against the sandbox before the demo. Guesses are isolated in one place on
- * purpose — correcting them should be a single-file change.
+ *   base      https://api-dev.rain.xyz     (api.rain.xyz rejects this key)
+ *   auth      header `api-key`             (not Authorization: Bearer)
+ *   create    POST /v1/issuing/users/{userId}/cards
+ *             body {type:"virtual", limit:{amount:<cents>, frequency:<enum>}}
+ *             NOTE: POST /v1/issuing/cards is 404 -- creation is nested
+ *             under the user, which is also where liability sits.
+ *   list/get  GET  /v1/issuing/cards        GET /v1/issuing/cards/{id}
+ *   mutate    PATCH /v1/issuing/cards/{id}  {status} and/or {limit}
+ *
+ * Enums are camelCase and narrow:
+ *   frequency  "perAuthorization" | "allTime"
+ *   status     "active" | "locked" | "canceled"
+ *
+ * The PATCH response echoes the *pre-update* body; re-read with GET to observe
+ * the change. That cost an hour -- do not trust the PATCH echo.
  */
 export interface RainConfig {
   apiKey: string;
   baseUrl?: string;
+  userId: string;
   collateralContractId: string;
-  /** Override once the real collateral route is known. */
-  collateralPath?: string;
 }
+
+type RainStatus = 'active' | 'locked' | 'canceled';
 
 export class RainRails implements CardRails {
   private readonly base: string;
-  private readonly collateralPath: string;
   private handler?: (auth: AuthEvent) => Promise<Decision>;
 
   constructor(private readonly cfg: RainConfig) {
-    this.base = (cfg.baseUrl ?? 'https://api.rain.xyz').replace(/\/$/, '');
-    this.collateralPath = cfg.collateralPath ?? '/v1/collateral-contracts';
+    this.base = (cfg.baseUrl ?? 'https://api-dev.rain.xyz').replace(/\/$/, '');
   }
 
   private async req<T>(
@@ -53,13 +61,9 @@ export class RainRails implements CardRails {
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
     });
-
     const text = await res.text();
     const parsed = text ? safeJson(text) : null;
-
     if (!res.ok) {
-      // 401 "Invalid api key" means the key is inactive, not that the call is
-      // malformed — routing and header parsing already succeeded by then.
       throw new RailsError(
         `Rain ${init.method ?? 'GET'} ${path} -> ${res.status}`,
         res.status,
@@ -70,43 +74,47 @@ export class RainRails implements CardRails {
   }
 
   async issueScopedCard(spec: CardSpec): Promise<CardHandle> {
-    // UNVERIFIED body shape.
-    const r = await this.req<any>('/v1/issuing/cards', {
+    const r = await this.req<any>(`/v1/issuing/users/${this.cfg.userId}/cards`, {
       method: 'POST',
       body: {
         type: 'virtual',
-        spendLimit: spec.amountCents,
-        spendLimitInterval: 'per_authorization',
-        merchantAllowlist: [spec.merchant],
-        mccAllowlist: [spec.mcc],
-        expiresAt: spec.expiresAt.toISOString(),
-        metadata: { agentId: spec.agentId, issuer: 'rainfall' },
+        // One authorization, one amount. Rain's own control surface doing
+        // exactly what the scoped-card design asks of it.
+        limit: { amount: spec.amountCents, frequency: 'perAuthorization' },
       },
     });
-    return { cardId: r.id ?? r.cardId, last4: r.last4 ?? '????', status: 'active' };
+    return { cardId: r.id, last4: r.last4 ?? '????', status: normalize(r.status) };
   }
 
   async freezeCard(cardId: string): Promise<void> {
-    await this.req(`/v1/issuing/cards/${cardId}`, {
-      method: 'PATCH',
-      body: { status: 'frozen' },
-    });
+    await this.patch(cardId, { status: 'locked' });
   }
 
   async revokeCard(cardId: string): Promise<void> {
-    await this.req(`/v1/issuing/cards/${cardId}`, {
-      method: 'PATCH',
-      body: { status: 'canceled' },
-    });
+    await this.patch(cardId, { status: 'canceled' });
+  }
+
+  /**
+   * Move a card's spend ceiling. This is the ladder's real teeth on the Rain
+   * side: as the agent's standing rises on Monad, the amount its card may
+   * authorize rises with it, on Rain's infrastructure, observable via GET.
+   */
+  async setSpendLimit(cardId: string, cents: Cents): Promise<void> {
+    await this.patch(cardId, { limit: { amount: cents, frequency: 'allTime' } });
+  }
+
+  private async patch(cardId: string, body: Record<string, unknown>): Promise<void> {
+    await this.req(`/v1/issuing/cards/${cardId}`, { method: 'PATCH', body });
   }
 
   async getCard(cardId: string): Promise<CardHandle | null> {
     try {
       const r = await this.req<any>(`/v1/issuing/cards/${cardId}`);
       return {
-        cardId: r.id ?? cardId,
+        cardId: r.id,
         last4: r.last4 ?? '????',
-        status: normalizeStatus(r.status),
+        status: normalize(r.status),
+        limitCents: r.limit?.amount ?? null,
       };
     } catch (e) {
       if (e instanceof RailsError && e.status === 404) return null;
@@ -114,47 +122,49 @@ export class RainRails implements CardRails {
     }
   }
 
-  /**
-   * Rain delivers authorizations by webhook, so the caller must also run the
-   * webhook server and forward events here. Registering the handler alone does
-   * not subscribe to anything.
-   */
+  async listCards(): Promise<CardHandle[]> {
+    const r = await this.req<any[]>('/v1/issuing/cards');
+    return r.map((c) => ({
+      cardId: c.id,
+      last4: c.last4 ?? '????',
+      status: normalize(c.status),
+      limitCents: c.limit?.amount ?? null,
+    }));
+  }
+
+  /** Rain delivers authorizations by webhook; the caller forwards them here. */
   onAuthorization(cb: (auth: AuthEvent) => Promise<Decision>): void {
     this.handler = cb;
   }
 
-  /** Entry point for the webhook route to call. */
   async handleWebhook(auth: AuthEvent): Promise<Decision> {
     if (!this.handler) throw new RailsError('no authorization handler bound');
     return this.handler(auth);
   }
 
-  async getCollateral(contractId: string): Promise<CollateralState> {
-    const r = await this.req<any>(`${this.collateralPath}/${contractId}`);
-    return {
-      lockedCents: r.lockedAmount ?? r.locked ?? 0,
-      availableCents: r.availableAmount ?? r.available ?? 0,
-    };
+  // ---- collateral ----
+  //
+  // /v1/contracts/{id} and /v1/issuing/contracts both return 403 for this key:
+  // the routes exist, we are not scoped to them. Rather than fake a number,
+  // these throw and the caller mirrors the ratio on Monad instead. The card
+  // spend limit above is the part of the ladder that genuinely executes here.
+
+  async getCollateral(_contractId: string): Promise<CollateralState> {
+    throw new RailsError('Rain collateral routes are 403 for this key', 403);
   }
 
-  async setRequiredCollateral(contractId: string, ratioBps: number): Promise<void> {
-    await this.req(`${this.collateralPath}/${contractId}`, {
-      method: 'PATCH',
-      body: { requiredCollateralBps: ratioBps },
-    });
+  async setRequiredCollateral(_contractId: string, _ratioBps: number): Promise<void> {
+    throw new RailsError('Rain collateral routes are 403 for this key', 403);
   }
 
-  async claimCollateral(contractId: string, amountCents: Cents): Promise<void> {
-    await this.req(`${this.collateralPath}/${contractId}/claim`, {
-      method: 'POST',
-      body: { amount: amountCents },
-    });
+  async claimCollateral(_contractId: string, _amountCents: Cents): Promise<void> {
+    throw new RailsError('Rain collateral routes are 403 for this key', 403);
   }
 }
 
-function normalizeStatus(s: string | undefined): CardHandle['status'] {
-  if (s === 'frozen' || s === 'paused' || s === 'suspended') return 'frozen';
-  if (s === 'canceled' || s === 'cancelled' || s === 'revoked') return 'revoked';
+function normalize(s: string | undefined): CardHandle['status'] {
+  if (s === 'locked') return 'frozen';
+  if (s === 'canceled') return 'revoked';
   return 'active';
 }
 

@@ -76,6 +76,12 @@
 const usd = c => '$' + (c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 let busy = false;
 
+/** Straight to checkout, where the buyer picks the term. */
+function checkout(sku){
+  sessionStorage.setItem('cart', JSON.stringify([sku]));
+  location.href = '/checkout';
+}
+
 async function buy(sku, label){
   if (busy) return;
   busy = true;
@@ -115,8 +121,9 @@ async function refresh(){
           ? per + ' &nbsp;·&nbsp; ' + (q.requiredCollateralBps/100) + '% collateral'
           : '<span style="color:var(--bad)">not available on credit — ' + (q?q.reason:'…') + '</span>'
       }</div>
-      <button class="btn ${q&&q.approved?'':'ghost'}" ${q&&q.approved?'':'disabled'}
-        onclick="buy('${i.sku}', ${JSON.stringify(i.label)})">Have my agent buy this</button>
+      <button class="btn" onclick="checkout('${i.sku}')">Buy with installments →</button>
+      <button class="btn ghost" ${q&&q.approved?'':'disabled'}
+        onclick="buy('${i.sku}', ${JSON.stringify(i.label)})">One-click · let the agent decide</button>
     </div>`;
   }).join('');
 

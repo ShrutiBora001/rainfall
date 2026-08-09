@@ -151,6 +151,29 @@ contract RainfallTest is Test {
         assertEq(a.reason, "agent not registered");
     }
 
+    // ---- checkout plans ----
+
+    function test_BuyerCanChooseTheTerm() public {
+        (uint256 id,) = underwriter.authorizeWithPlan(agent, merchant, PHONE, 6);
+        InstallmentAgreement.Agreement memory a = agreements.agreementOf(id);
+        assertEq(a.installments, 6, "six-installment plan honoured");
+        // Same total payable, spread thinner.
+        assertEq(uint256(a.installmentAmount) * 6, agreements.outstandingOf(id));
+    }
+
+    function test_RejectsAbsurdPlans() public {
+        vm.expectRevert(abi.encodeWithSelector(Underwriter.BadPlan.selector, uint16(1)));
+        underwriter.authorizeWithPlan(agent, merchant, PHONE, 1);
+        vm.expectRevert(abi.encodeWithSelector(Underwriter.BadPlan.selector, uint16(24)));
+        underwriter.authorizeWithPlan(agent, merchant, PHONE, 24);
+    }
+
+    function test_PlanChoiceDoesNotBypassUnderwriting() public {
+        // Stretching the term does not make an over-limit purchase affordable.
+        vm.expectRevert();
+        underwriter.authorizeWithPlan(agent, merchant, BIKE, 12);
+    }
+
     // ---- early payoff ----
 
     function test_PayoffSettlesTheWholeBalance() public {

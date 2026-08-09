@@ -18,7 +18,7 @@ import {
  * pitch and it cannot be driven reliably against a live sandbox on stage.
  */
 export class MockRails implements CardRails {
-  private cards = new Map<string, CardHandle & { spec: CardSpec }>();
+  private cards = new Map<string, CardHandle & { spec: CardSpec; limitCents: Cents }>();
   private collateral = new Map<string, CollateralState>();
   private requiredBps = new Map<string, number>();
   private handler?: (auth: AuthEvent) => Promise<Decision>;
@@ -39,7 +39,7 @@ export class MockRails implements CardRails {
       last4: String(4000 + this.seq).slice(-4),
       status: 'active',
     };
-    this.cards.set(cardId, { ...handle, spec });
+    this.cards.set(cardId, { ...handle, spec, limitCents: spec.amountCents });
     return handle;
   }
 
@@ -53,7 +53,15 @@ export class MockRails implements CardRails {
 
   async getCard(cardId: string): Promise<CardHandle | null> {
     const c = this.cards.get(cardId);
-    return c ? { cardId: c.cardId, last4: c.last4, status: c.status } : null;
+    return c
+      ? { cardId: c.cardId, last4: c.last4, status: c.status, limitCents: c.limitCents }
+      : null;
+  }
+
+  async setSpendLimit(cardId: string, cents: Cents): Promise<void> {
+    const c = this.cards.get(cardId);
+    if (!c) throw new RailsError(`unknown card ${cardId}`);
+    c.limitCents = cents;
   }
 
   onAuthorization(cb: (auth: AuthEvent) => Promise<Decision>): void {

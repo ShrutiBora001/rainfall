@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   CardHandle,
   CardRails,
@@ -43,6 +44,33 @@ export interface RainConfig {
 
 type RainStatus = 'active' | 'locked' | 'canceled';
 
+/** Rain's published sandbox key for sealing the session secret. */
+const SANDBOX_PEM = `-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCAP192809jZyaw62g/eTzJ3P9H
++RmT88sXUYjQ0K8Bx+rJ83f22+9isKx+lo5UuV8tvOlKwvdDS/pVbzpG7D7NO45c
+0zkLOXwDHZkou8fuj8xhDO5Tq3GzcrabNLRLVz3dkx0znfzGOhnY4lkOMIdKxlQb
+LuVM/dGDC9UpulF+UwIDAQAB
+-----END PUBLIC KEY-----`;
+
+/**
+ * The scoped-card endpoint requires a `sessionid`: a 32-char hex secret,
+ * base64'd, then RSA-OAEP encrypted under Rain's public key and base64'd again.
+ * The same secret decrypts the encryptedPan/encryptedCvc the card comes back
+ * with — we don't need the PAN here, but keep the secret so a caller that does
+ * can decrypt it.
+ *
+ * Note the padding hash is SHA-1, not SHA-256. SHA-256 fails.
+ */
+function newSession(pem = SANDBOX_PEM): { secretKey: string; sessionId: string } {
+  const secretKey = crypto.randomUUID().replace(/-/g, '');
+  const b64 = Buffer.from(secretKey, 'hex').toString('base64');
+  const sealed = crypto.publicEncrypt(
+    { key: pem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' },
+    Buffer.from(b64, 'utf-8'),
+  );
+  return { secretKey, sessionId: sealed.toString('base64') };
+}
+
 export class RainRails implements CardRails {
   private readonly base: string;
   private handler?: (auth: AuthEvent) => Promise<Decision>;
@@ -53,7 +81,7 @@ export class RainRails implements CardRails {
 
   private async req<T>(
     path: string,
-    init: { method?: string; body?: unknown } = {},
+    init: { method?: string; body?: unknown; headers?: Record<string, string> } = {},
   ): Promise<T> {
     const res = await fetch(`${this.base}${path}`, {
       method: init.method ?? 'GET',
@@ -61,6 +89,7 @@ export class RainRails implements CardRails {
         'api-key': this.cfg.apiKey,
         'content-type': 'application/json',
         accept: 'application/json',
+        ...(init.headers ?? {}),
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
     });
@@ -76,18 +105,40 @@ export class RainRails implements CardRails {
     return parsed as T;
   }
 
+  /**
+   * Rain's scoped card — their agentic-commerce primitive, and the right tool
+   * for this job. One call binds an amount, an expiry, and an MCC allowlist to
+   * a single card, and Rain enforces all three at authorization rather than us
+   * checking them after the fact.
+   *
+   * The plain /cards endpoint can only cap an amount, which is why this is a
+   * different endpoint and not a parameter.
+   */
   async issueScopedCard(spec: CardSpec): Promise<CardHandle> {
-    const r = await this.req<any>(`/v1/issuing/users/${this.cfg.userId}/cards`, {
-      method: 'POST',
-      body: {
-        type: 'virtual',
-        // One authorization, one amount. Rain's own control surface doing
-        // exactly what the scoped-card design asks of it.
-        limit: { amount: spec.amountCents, frequency: 'perAuthorization' },
+    const { sessionId, secretKey } = newSession();
+    const r = await this.req<any>(
+      `/v1/issuing/users/${this.cfg.userId}/cards/scoped`,
+      {
+        method: 'POST',
+        body: {
+          amountInUSDCents: spec.amountCents,
+          allowedMccs: [spec.mcc],
+          expiresAt: spec.expiresAt.toISOString(),
+        },
+        headers: { sessionid: sessionId },
       },
-    });
-    return { cardId: r.id, last4: r.last4 ?? '????', status: normalize(r.status) };
+    );
+    this.sessions.set(r.id, secretKey);
+    return {
+      cardId: r.id,
+      last4: r.last4 ?? '????',
+      status: normalize(r.status),
+      limitCents: spec.amountCents,
+    };
   }
+
+  /** Session secret per card, for decrypting the PAN if a caller needs it. */
+  private sessions = new Map<string, string>();
 
   async freezeCard(cardId: string): Promise<void> {
     await this.patch(cardId, { status: 'locked' });

@@ -18,7 +18,7 @@ const keeper = new Keeper(svc, {
 let agentLive = false;
 let agentBusy = false;
 
-const html = () => readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+const page = (name: string) => readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
@@ -30,8 +30,15 @@ const server = createServer(async (req, res) => {
   try {
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      return res.end(html());
+      return res.end(page('index.html'));
     }
+
+    if (url.pathname === '/shop') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return res.end(page('shop.html'));
+    }
+
+    if (url.pathname === '/api/shop') return json(200, await svc.storefront());
 
     if (url.pathname === '/api/state') {
       return json(200, {

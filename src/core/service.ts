@@ -15,7 +15,7 @@ import {
 import { MockRails } from '../rails/mock.js';
 import { RainRails } from '../rails/rain.js';
 import type { CardRails, Cents } from '../rails/types.js';
-import { CATALOG, catalogList, findItem, type CatalogItem } from './catalog.js';
+import { CATALOG, catalogList, findItem, merchants, type CatalogItem } from './catalog.js';
 
 export interface LogEntry {
   at: number;
@@ -342,6 +342,49 @@ export class RainfallService {
 
   catalog() {
     return catalogList();
+  }
+
+  /**
+   * The merchant's side of the same transaction. This is the half of BNPL that
+   * usually goes unshown: the merchant is settled in full the moment the card
+   * authorizes, while the buyer still owes four installments. Two windows side
+   * by side make the split legible without a word of explanation.
+   */
+  async storefront() {
+    const balances = await Promise.all(
+      merchants().map(async (m) => ({
+        ...m,
+        settledCents: Number(
+          ((await this.pub.readContract({
+            address: this.dep.contracts.MockUSDC,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [m.address],
+          })) as bigint) / 10_000n,
+        ),
+      })),
+    );
+
+    const s = await this.state();
+    const orders = s.agreements.map((a) => {
+      const item = catalogList().find(
+        (i) => i.merchantAddress.toLowerCase() === a.merchant.toLowerCase(),
+      );
+      const total = Number(BigInt(a.installmentAmount) / 10_000n) * a.installments;
+      const paid = Number(BigInt(a.installmentAmount) / 10_000n) * a.paid;
+      return {
+        id: a.id,
+        merchant: item?.merchant ?? a.merchant.slice(0, 10),
+        item: item?.label ?? 'unknown',
+        art: item?.art ?? '📦',
+        settledCents: Number(BigInt(a.principal) / 10_000n),
+        buyerOwesCents: Math.max(total - paid, 0),
+        installments: `${a.paid}/${a.installments}`,
+        status: a.status,
+      };
+    });
+
+    return { merchants: balances, orders, catalog: catalogList() };
   }
 }
 

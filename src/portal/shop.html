@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Voltmart & Corso — powered by Rainfall</title>
+<style>
+  :root{
+    --bg:#0a0d12; --panel:#121721; --line:#1e2633; --ink:#e8edf5; --dim:#8697ad;
+    --ok:#3ddc97; --warn:#ffb454; --bad:#ff5c7a; --accent:#5aa9ff;
+    font-family: ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:22px 26px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:24px;margin:0;letter-spacing:-.4px}
+  .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);padding:3px 9px;border-radius:999px}
+  a{color:var(--accent);text-decoration:none;font-size:13px}
+  .lede{color:var(--dim);font-size:13.5px;margin:0 0 18px;max-width:70ch;line-height:1.5}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:18px;display:flex;flex-direction:column;gap:10px}
+  .art{font-size:44px;line-height:1}
+  .name{font-size:16px;font-weight:600}
+  .blurb{font-size:12.5px;color:var(--dim);line-height:1.45}
+  .price{font-size:26px;font-weight:650;letter-spacing:-.5px}
+  .emi{font-size:12.5px;color:var(--accent)}
+  .merch{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.8px}
+  .btn{background:var(--accent);color:#04101f;border:0;border-radius:9px;
+       padding:11px 14px;font-size:13.5px;font-weight:600;cursor:pointer;width:100%}
+  .btn:hover{filter:brightness(1.08)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.ghost{background:#1d2635;color:var(--ink);border:1px solid #2b3648}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);margin-bottom:10px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}
+  @media(max-width:900px){.split{grid-template-columns:1fr}}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:10px 0;
+       border-bottom:1px solid var(--line);font-size:13.5px}
+  .row:last-child{border-bottom:0}
+  .sub{font-size:12px;color:var(--dim)}
+  .pill{font-size:10.5px;padding:3px 8px;border-radius:999px;font-weight:650}
+  .pill.ok{background:rgba(61,220,151,.14);color:var(--ok)}
+  .pill.bad{background:rgba(255,92,122,.14);color:var(--bad)}
+  .pill.warn{background:rgba(255,180,84,.14);color:var(--warn)}
+  .big{font-size:30px;font-weight:650;letter-spacing:-1px}
+  #status{margin-top:14px;font-size:13px;color:var(--dim);min-height:20px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Voltmart &amp; Corso</h1>
+  <span class="tag">checkout by Rainfall</span>
+  <a href="/">← agent portal</a>
+</header>
+<p class="lede">
+  A storefront the agent buys <em>from</em>. Every item offers installments at checkout.
+  The merchant is paid in full the moment the card authorizes — the buyer repays over time.
+</p>
+
+<div class="grid" id="shelf"></div>
+<div id="status"></div>
+
+<div class="split">
+  <div class="panel">
+    <div class="label">Merchant ledger — settled instantly</div>
+    <div id="merchants"></div>
+  </div>
+  <div class="panel">
+    <div class="label">Orders</div>
+    <div id="orders"><div class="sub">no orders yet</div></div>
+  </div>
+</div>
+
+<script>
+const usd = c => '$' + (c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+let busy = false;
+
+async function buy(sku, label){
+  if (busy) return;
+  busy = true;
+  status.textContent = `Asking the agent to buy the ${label}…`;
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
+  try{
+    const goal = `A customer wants the ${label}. Check what credit terms you can get for it, and buy it if the terms are acceptable.`;
+    const r = await fetch('/api/agent?sku='+encodeURIComponent(sku)+'&goal='+encodeURIComponent(goal));
+    const d = await r.json();
+    status.innerHTML = d.error
+      ? '<span style="color:var(--bad)">'+d.error+'</span>'
+      : (d.scripted?'<span class="pill warn">SCRIPTED</span> ':'') + d.text;
+  }catch(e){ status.textContent = String(e); }
+  busy = false;
+  refresh();
+}
+
+async function refresh(){
+  const [shopRes, stateRes] = await Promise.all([
+    fetch('/api/shop').then(r=>r.json()),
+    fetch('/api/state').then(r=>r.json()),
+  ]);
+
+  shelf.innerHTML = shopRes.catalog.map(i=>{
+    const q = stateRes.quotes[i.sku];
+    const per = q && q.approved
+      ? usd(Math.round(i.cents*(1+q.aprBps/10000)/q.installments)) + ' × ' + q.installments
+      : null;
+    return `<div class="card">
+      <div class="art">${i.art}</div>
+      <div class="merch">${i.merchant}</div>
+      <div class="name">${i.label}</div>
+      <div class="blurb">${i.blurb}</div>
+      <div class="price">${usd(i.cents)}</div>
+      <div class="emi">${
+        q && q.approved
+          ? per + ' &nbsp;·&nbsp; ' + (q.requiredCollateralBps/100) + '% collateral'
+          : '<span style="color:var(--bad)">not available on credit — ' + (q?q.reason:'…') + '</span>'
+      }</div>
+      <button class="btn ${q&&q.approved?'':'ghost'}" ${q&&q.approved?'':'disabled'}
+        onclick="buy('${i.sku}', ${JSON.stringify(i.label)})">Have my agent buy this</button>
+    </div>`;
+  }).join('');
+
+  merchants.innerHTML = shopRes.merchants.map(m=>`
+    <div class="row">
+      <div><div>${m.name}</div><div class="sub">${m.address.slice(0,14)}…</div></div>
+      <div style="text-align:right"><div class="big">${usd(m.settledCents)}</div>
+        <div class="sub">received</div></div>
+    </div>`).join('');
+
+  orders.innerHTML = shopRes.orders.length ? shopRes.orders.map(o=>{
+    const cls = o.status==='Settled'?'ok':o.status==='Delinquent'?'bad':'warn';
+    return `<div class="row">
+      <div><div>${o.art} ${o.item}</div>
+        <div class="sub">${o.merchant} · paid ${usd(o.settledCents)} at t0</div></div>
+      <div style="text-align:right">
+        <span class="pill ${cls}">${o.status.toUpperCase()}</span>
+        <div class="sub">buyer owes ${usd(o.buyerOwesCents)} · ${o.installments}</div></div>
+    </div>`;
+  }).join('') : '<div class="sub">no orders yet</div>';
+}
+
+refresh();
+setInterval(()=>{ if(!busy) refresh(); }, 2000);
+</script>
+</body>
+</html>

@@ -726,21 +726,23 @@ export class RainfallService {
   }
 
   private async readStorefront() {
-    const balances = await Promise.all(
-      merchants().map(async (m) => ({
-        ...m,
-        settledCents: Number(
-          ((await this.pub.readContract({
-            address: this.dep.contracts.MockUSDC,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [m.address],
-          })) as bigint) / 10_000n,
-        ),
-      })),
-    );
-
     const s = await this.state();
+
+    // Settled amounts are derived from this agent's own orders, not the
+    // merchant's raw token balance. The balance is cumulative across every
+    // agent identity that ever traded — including test runs — so the ledger
+    // read $2,242 while the orders list beneath it, which is filtered to the
+    // current agent, showed nothing. Two panels describing the same
+    // transactions have to agree.
+    const earned = new Map<string, number>();
+    for (const a of s.agreements) {
+      const key = a.merchant.toLowerCase();
+      earned.set(key, (earned.get(key) ?? 0) + Number(BigInt(a.principal) / 10_000n));
+    }
+    const balances = merchants().map((m) => ({
+      ...m,
+      settledCents: earned.get(m.address.toLowerCase()) ?? 0,
+    }));
     const orders = s.agreements.map((a: any) => {
       const item = catalogList().find(
         (i) => i.merchantAddress.toLowerCase() === a.merchant.toLowerCase(),

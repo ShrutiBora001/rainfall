@@ -1,0 +1,17 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+# src/ has zero external dependencies and compiles standalone.
+# forge-std is needed only to run the test suite.
+libs = ["lib"]
+solc = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+
+[rpc_endpoints]
+monad = "${MONAD_RPC}"
+
+[etherscan]
+monad = { key = "${MONADSCAN_API_KEY}", url = "https://testnet.monadscan.com/api" }

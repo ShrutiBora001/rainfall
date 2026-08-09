@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Rainfall — EMI rails for agents</title>
+<style>
+  :root {
+    --bg:#0a0d12; --panel:#121721; --line:#1e2633; --ink:#e8edf5; --dim:#8697ad;
+    --ok:#3ddc97; --warn:#ffb454; --bad:#ff5c7a; --accent:#5aa9ff;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);padding:22px 26px}
+  header{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+  h1{font-size:26px;margin:0;letter-spacing:-.4px}
+  .tag{font-size:12px;color:var(--dim);border:1px solid var(--line);
+       padding:3px 9px;border-radius:999px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);margin-bottom:8px}
+  .hero{font-size:46px;font-weight:650;letter-spacing:-1.5px;line-height:1}
+  .sub{font-size:13px;color:var(--dim);margin-top:7px}
+  .bar{height:7px;background:#0c1119;border-radius:99px;overflow:hidden;margin-top:12px}
+  .bar > i{display:block;height:100%;background:var(--accent);transition:width .5s ease}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;
+       padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .row:last-child{border-bottom:0}
+  .btn{background:#1d2635;color:var(--ink);border:1px solid #2b3648;
+       border-radius:9px;padding:9px 14px;font-size:13px;
+       cursor:pointer;font-weight:550}
+  .btn:hover{background:#26324a}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  .btn.primary{background:var(--accent);color:#04101f;border-color:transparent}
+  .btn.danger{background:#3a1622;color:var(--bad);border-color:#5a2334}
+  .controls{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:650}
+  .pill.ok{background:rgba(61,220,151,.14);color:var(--ok)}
+  .pill.bad{background:rgba(255,92,122,.14);color:var(--bad)}
+  .pill.warn{background:rgba(255,180,84,.14);color:var(--warn)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  #log{max-height:230px;overflow:auto}
+  #log div{padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;display:flex;gap:9px}
+  .k{flex:0 0 74px;color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.7px;padding-top:2px}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .split{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-top:14px}
+  @media (max-width:900px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Rainfall</h1>
+  <span class="tag">EMI rails for autonomous agents</span>
+  <span class="tag" id="chain">—</span>
+  <span class="tag" id="rails">—</span>
+  <span class="tag mono" id="agent">—</span>
+</header>
+
+<div class="grid">
+  <div class="panel">
+    <div class="label">Collateral required</div>
+    <div class="hero" id="collBps">—</div>
+    <div class="sub" id="collSub">of every purchase must stay locked</div>
+    <div class="bar"><i id="collBar" style="width:100%"></i></div>
+  </div>
+  <div class="panel">
+    <div class="label">Credit limit</div>
+    <div class="hero" id="limit">—</div>
+    <div class="sub" id="limitSub">earned, not deposited</div>
+  </div>
+  <div class="panel">
+    <div class="label">Credit score</div>
+    <div class="hero" id="score">—</div>
+    <div class="sub" id="hist">—</div>
+  </div>
+  <div class="panel">
+    <div class="label">Rain collateral contract</div>
+    <div class="hero" id="locked">—</div>
+    <div class="sub" id="lockedSub">locked · <span id="avail">—</span> released to principal</div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="btn" onclick="call('/api/setup')">Register agent</button>
+  <button class="btn primary" onclick="call('/api/buy?sku=phone')">Buy Pixel 9a · $499</button>
+  <button class="btn primary" onclick="call('/api/buy?sku=bike')">Buy e-bike · $1,200</button>
+  <button class="btn" id="payBtn">Pay next installment</button>
+  <button class="btn danger" id="missBtn">Force a missed payment</button>
+</div>
+
+<div class="split">
+  <div class="stack">
+    <div class="panel">
+      <div class="label">Underwriting quotes — live from Monad</div>
+      <div id="quotes"></div>
+    </div>
+    <div class="panel">
+      <div class="label">Obligations</div>
+      <div id="agreements"><div class="sub">none yet</div></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="label">Activity</div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+const usd = u => '$' + (Number(u)/1e6).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+let state = null;
+
+async function call(path){
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
+  try { await fetch(path); await refresh(); }
+  finally { document.querySelectorAll('.btn').forEach(b=>b.disabled=false); }
+}
+
+function activeId(){
+  const a = (state?.agreements||[]).filter(x=>x.status==='Active');
+  return a.length ? a[a.length-1].id : null;
+}
+
+async function refresh(){
+  const r = await fetch('/api/state');
+  state = await r.json();
+  const c = state.credit;
+
+  chain.textContent = state.deployment.label + ' · ' + state.deployment.chainId;
+  rails.textContent = 'rails: ' + state.rails;
+  agent.textContent = state.agent.slice(0,10) + '…';
+
+  const bps = Number(c.requiredCollateralBps);
+  collBps.textContent = (bps/100) + '%';
+  collBar.style.width = (bps/100) + '%';
+  collBar.style.background = bps===0 ? 'var(--ok)' : bps<=5000 ? 'var(--warn)' : 'var(--accent)';
+  collSub.textContent = bps===0
+    ? 'spending on reputation alone'
+    : 'of every purchase must stay locked';
+
+  limit.textContent = usd(c.creditLimit);
+  score.textContent = c.score;
+  hist.textContent = `${c.onTime} on time · ${c.late} late · ${c.defaults} defaults`;
+  limitSub.textContent = Number(c.creditLimit)===0 ? 'revoked after default' : 'earned, not deposited';
+
+  if (state.collateral){
+    locked.textContent = '$' + (state.collateral.lockedCents/100).toLocaleString();
+    avail.textContent = '$' + (state.collateral.availableCents/100).toLocaleString();
+  }
+
+  quotes.innerHTML = Object.values(state.quotes).map(q=>`
+    <div class="row">
+      <div>
+        <div>${q.label}</div>
+        <div class="sub">$${(q.cents/100).toLocaleString()} · ${q.merchant} · MCC ${q.mcc}</div>
+      </div>
+      <div style="text-align:right">
+        <span class="pill ${q.approved?'ok':'bad'}">${q.approved?'APPROVED':'DECLINED'}</span>
+        <div class="sub">${q.approved ? (q.requiredCollateralBps/100)+'% collateral · '+q.installments+'×' : q.reason}</div>
+      </div>
+    </div>`).join('');
+
+  agreements.innerHTML = state.agreements.length ? state.agreements.map(a=>{
+    const cls = a.status==='Settled'?'ok':a.status==='Delinquent'?'bad':a.overdue?'warn':'ok';
+    const due = a.nextDueAt - state.now;
+    return `<div class="row">
+      <div>
+        <div>#${a.id} · ${usd(a.principal)} <span class="sub">→ ${a.merchant.slice(0,8)}…</span></div>
+        <div class="sub">${a.paid}/${a.installments} paid · ${usd(a.installmentAmount)} each
+          ${a.cardId?'· card '+a.cardId:''}</div>
+      </div>
+      <div style="text-align:right">
+        <span class="pill ${cls}">${a.status.toUpperCase()}</span>
+        <div class="sub">${a.status==='Active' ? (due>0? 'due in '+due+'s' : 'OVERDUE') : ''}</div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="sub">none yet</div>';
+
+  log.innerHTML = state.log.map(l=>`<div><span class="k">${l.kind}</span><span>${l.text}</span></div>`).join('');
+
+  const id = activeId();
+  payBtn.disabled = !id; missBtn.disabled = !id;
+  payBtn.onclick = ()=> id && call('/api/pay?id='+id);
+  missBtn.onclick = ()=> id && call('/api/miss?id='+id);
+}
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>

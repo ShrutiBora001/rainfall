@@ -33,7 +33,8 @@ export class RainfallService {
   readonly dep: Deployment;
   readonly rails: CardRails;
   readonly collateralId: string;
-  readonly agent: `0x${string}`;
+  agent: `0x${string}`;
+  agentIndex: number;
   readonly principal: `0x${string}`;
 
   private pub;
@@ -81,7 +82,13 @@ export class RainfallService {
     this.principal = account.address;
     // The agent's own key -- deliberately distinct from the principal, who
     // carries the liability.
-    this.agent = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+    //
+    // Credit is keyed by agent address in CreditScore, so rotating to an unused
+    // address is a complete reset of standing for the price of one register
+    // transaction. Redeploying to get a clean slate costs ~0.86 MON; this costs
+    // ~0.005, which matters when you are rehearsing.
+    this.agentIndex = Number(process.env.AGENT_INDEX ?? 0);
+    this.agent = AGENT_POOL[this.agentIndex % AGENT_POOL.length];
 
     this.collateralId = process.env.RAIN_COLLATERAL_CONTRACT_ID ?? 'demo-collateral';
     const mode = opts.railsMode ?? (process.env.RAILS === 'rain' ? 'rain' : 'mock');
@@ -123,6 +130,19 @@ export class RainfallService {
       args,
     } as any);
     return this.pub.waitForTransactionReceipt({ hash });
+  }
+
+  /**
+   * Move to the next unused agent identity. Standing lives per-address, so this
+   * is a clean credit history without touching the contracts.
+   */
+  rotateAgent(): { index: number; agent: string } {
+    this.agentIndex = (this.agentIndex + 1) % AGENT_POOL.length;
+    this.agent = AGENT_POOL[this.agentIndex];
+    this.standingCardId = null;
+    this.stateCache = null;
+    this.say('reset', `switched to agent #${this.agentIndex} ${this.agent.slice(0, 10)} — fresh credit history`);
+    return { index: this.agentIndex, agent: this.agent };
   }
 
   // ---- lifecycle ----
@@ -579,7 +599,7 @@ export class RainfallService {
     // batch -- sequential awaits become sequential eth_calls, which is what
     // rate-limits a public RPC.
     const ids = Array.from({ length: Number(nextId) - 1 }, (_, i) => i + 1);
-    const agreements = await Promise.all(
+    const all = await Promise.all(
       ids.map(async (i) => {
         const [a, overdue, late] = await Promise.all([
           this.agr.read.agreementOf([BigInt(i)]),
@@ -599,8 +619,14 @@ export class RainfallService {
           overdue,
           late,
           cardId: this.cards.get(i) ?? null,
+          owner: a.agent,
         };
       }),
+    );
+    // Obligations belonging to a retired agent identity stay on-chain but are
+    // not this agent's problem, and must not appear in its portfolio.
+    const agreements = all.filter(
+      (a) => a.owner.toLowerCase() === this.agent.toLowerCase(),
     );
 
     const items = catalogList();
@@ -695,6 +721,22 @@ export class RainfallService {
     return { merchants: balances, orders, catalog: catalogList() };
   }
 }
+
+/**
+ * Deterministic throwaway agent identities. These are the standard test-mnemonic
+ * addresses; nothing of value is ever held by them -- the agent key only needs
+ * to be a stable identifier the registry can bind to a principal.
+ */
+const AGENT_POOL: `0x${string}`[] = [
+  '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+  '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+  '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
+  '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
+  '0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc',
+  '0x976EA74026E726554dB657fA54763abd0C3a0aa9',
+  '0x14dC79964da2C08b23698B3D3cc7Ca32193d9955',
+  '0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f',
+];
 
 export const usd = (cents: Cents): string =>
   (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });

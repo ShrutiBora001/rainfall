@@ -116,6 +116,7 @@
 
 <div class="controls">
   <button class="btn" onclick="call('/api/setup')">Register agent</button>
+  <button class="btn" onclick="if(confirm('Switch to a fresh agent identity? Clears credit history.'))call('/api/reset')">Reset — new agent</button>
   <button class="btn" onclick="call('/api/buy?sku=phone')">Buy Nimbus 9a · $499</button>
   <button class="btn" onclick="call('/api/buy?sku=bike')">Buy Corso e-bike · $1,200</button>
   <a class="btn" href="/shop" style="text-decoration:none">Open storefront →</a>

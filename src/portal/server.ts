@@ -49,6 +49,12 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    if (url.pathname === '/api/reset') {
+      const r = svc.rotateAgent();
+      await svc.setup();
+      return json(200, { ok: true, ...r });
+    }
+
     if (url.pathname === '/api/setup') {
       await svc.setup();
       return json(200, { ok: true });

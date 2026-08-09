@@ -40,6 +40,12 @@ contract Deploy is Script {
 
         underwriter.setTerms(4, 800, cadence);
 
+        // Grace has to be wide enough to actually see. At the contract default
+        // of 5s against a 20s cadence the late state flashes past; half the
+        // cadence keeps "late but not in default" on screen long enough to
+        // point at, which is the whole reason it exists as a distinct state.
+        agreements.setGrace(cadence / 2);
+
         // Seed the pool so the first purchase can actually be funded.
         usdc.mint(deployer, 1_000_000e6);
         usdc.approve(address(pool), type(uint256).max);
@@ -51,6 +57,28 @@ contract Deploy is Script {
         require(pool.authorized(address(agreements)), "pool wiring failed");
         require(agreements.authorized(address(underwriter)), "agreements wiring failed");
 
+        // Write the address book. Hand-maintaining this is a trap: redeploying
+        // to a live chain advances the deployer's nonce, so the contracts land
+        // at new addresses while a stale file still points at the old ones --
+        // the app then talks to abandoned contracts and reports old state.
+        string memory name = vm.envOr("DEPLOYMENT_NAME", string("local"));
+        string memory c = "contracts";
+        vm.serializeAddress(c, "MockUSDC", address(usdc));
+        vm.serializeAddress(c, "AgentRegistry", address(registry));
+        vm.serializeAddress(c, "CreditScore", address(score));
+        vm.serializeAddress(c, "LiquidityPool", address(pool));
+        vm.serializeAddress(c, "InstallmentAgreement", address(agreements));
+        string memory contractsJson = vm.serializeAddress(c, "Underwriter", address(underwriter));
+
+        string memory root = "root";
+        vm.serializeUint(root, "chainId", block.chainid);
+        vm.serializeString(root, "rpc", vm.envOr("DEPLOY_RPC", string("http://127.0.0.1:8545")));
+        vm.serializeString(root, "label", vm.envOr("DEPLOYMENT_LABEL", string("anvil (local)")));
+        vm.serializeAddress(root, "deployer", deployer);
+        string memory out = vm.serializeString(root, "contracts", contractsJson);
+        vm.writeJson(out, string.concat("./../deployments/", name, ".json"));
+
+        console2.log("wrote deployments/%s.json", name);
         console2.log("MockUSDC            ", address(usdc));
         console2.log("AgentRegistry       ", address(registry));
         console2.log("CreditScore         ", address(score));

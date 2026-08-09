@@ -6,6 +6,9 @@ test = "test"
 # forge-std is needed only to run the test suite.
 libs = ["lib"]
 solc = "0.8.24"
+# Deploy.s.sol writes the address book here. Foundry denies filesystem access
+# outside the project root unless it is granted explicitly.
+fs_permissions = [{ access = "read-write", path = "../deployments" }]
 optimizer = true
 optimizer_runs = 200
 via_ir = false

@@ -43,6 +43,21 @@
   #log div{padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;display:flex;gap:9px}
   .k{flex:0 0 74px;color:var(--dim);text-transform:uppercase;font-size:10px;letter-spacing:.7px;padding-top:2px}
   .stack{display:flex;flex-direction:column;gap:14px}
+  .steps{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .step{display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:9px;
+        background:#0c1119;border:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .step b{font-weight:600}
+  .step.done{color:var(--ok);border-color:rgba(61,220,151,.3)}
+  .step.now{color:var(--ink);border-color:var(--accent);background:#131c2b}
+  .step.bad{color:var(--bad);border-color:rgba(255,92,122,.35)}
+  .arrow{color:#2b3648;font-size:13px}
+  table.sched{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.sched th{text-align:left;font-weight:500;color:var(--dim);font-size:10.5px;
+                 text-transform:uppercase;letter-spacing:.7px;padding:0 8px 8px 0}
+  table.sched td{padding:7px 8px 7px 0;border-top:1px solid var(--line)}
+  table.sched tr.paid td{color:var(--dim)}
+  table.sched tr.due td{color:var(--ink);font-weight:550}
+  .num{font-variant-numeric:tabular-nums}
   .goal{flex:1;min-width:280px;background:#0c1119;border:1px solid var(--line);
         border-radius:9px;padding:10px 12px;color:var(--ink);font-size:13px;
         font-family:inherit}
@@ -59,6 +74,11 @@
   <span class="tag" id="rails">—</span>
   <span class="tag mono" id="agent">—</span>
 </header>
+
+<div class="panel" style="margin-bottom:14px">
+  <div class="label">Lifecycle</div>
+  <div class="steps" id="steps"></div>
+</div>
 
 <div class="grid">
   <div class="panel">
@@ -96,8 +116,9 @@
 
 <div class="controls">
   <button class="btn" onclick="call('/api/setup')">Register agent</button>
-  <button class="btn" onclick="call('/api/buy?sku=phone')">Buy Pixel 9a · $499</button>
-  <button class="btn" onclick="call('/api/buy?sku=bike')">Buy e-bike · $1,200</button>
+  <button class="btn" onclick="call('/api/buy?sku=phone')">Buy Nimbus 9a · $499</button>
+  <button class="btn" onclick="call('/api/buy?sku=bike')">Buy Corso e-bike · $1,200</button>
+  <a class="btn" href="/shop" style="text-decoration:none">Open storefront →</a>
   <button class="btn" id="payBtn">Pay next installment</button>
   <button class="btn danger" id="missBtn">Force a missed payment</button>
 </div>
@@ -119,6 +140,10 @@
       <div class="label">Obligations</div>
       <div id="agreements"><div class="sub">none yet</div></div>
     </div>
+    <div class="panel">
+      <div class="label">Repayment schedule <span id="schedTitle" class="sub"></span></div>
+      <div id="schedule"><div class="sub">select an obligation</div></div>
+    </div>
   </div>
   <div class="panel">
     <div class="label">Activity</div>
@@ -128,7 +153,63 @@
 
 <script>
 const usd = u => '$' + (Number(u)/1e6).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-let state = null;
+const c2 = c => '$' + (Number(c)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+let state = null, selected = null, onboarding = null;
+
+function selectAgreement(id){ selected = id; renderSchedule(id); refresh(); }
+
+/** The whole chain, user to execution, as one row. */
+function renderSteps(s){
+  const has = s.agreements.length > 0;
+  const active = s.agreements.find(a=>a.status==='Active');
+  const settled = s.agreements.some(a=>a.status==='Settled');
+  const bad = s.agreements.some(a=>a.status==='Delinquent');
+  const onboarded = onboarding && onboarding.registered;
+
+  const st = [
+    ['Onboard', 'KYC + collateral posted', onboarded?'done':'now'],
+    ['Underwrite', 'terms priced on Monad', has?'done':(onboarded?'now':'')],
+    ['Authorize', 'Rain card issued, merchant paid', has?'done':''],
+    ['Service', 'installments collected', active?'now':(has?'done':'')],
+    [bad?'Default':'Settle', bad?'collateral claimed, card frozen':'obligation closed',
+      bad?'bad':(settled?'done':'')],
+  ];
+  steps.innerHTML = st.map(([n,d,cls],i)=>
+    (i?'<span class="arrow">→</span>':'') +
+    `<div class="step ${cls}"><b>${n}</b><span class="sub">${d}</span></div>`
+  ).join('');
+}
+
+async function renderSchedule(id){
+  try{
+    const d = await fetch('/api/schedule?id='+id).then(r=>r.json());
+    schedTitle.textContent =
+      `· #${d.id} · ${c2(d.principalCents)} principal + ${c2(d.totalInterestCents)} interest `
+      + `(${d.aprBps/100}% APR) = ${c2(d.totalPayableCents)}`;
+    const canAct = d.status==='Active';
+    schedule.innerHTML = `
+      <table class="sched">
+        <tr><th>#</th><th>due</th><th>principal</th><th>interest</th><th>total</th><th></th></tr>
+        ${d.rows.map(r=>{
+          const t = r.dueAt - state.now;
+          const when = r.status==='paid' ? 'paid'
+            : t>0 ? 'in '+t+'s' : (r.status==='due' ? (d.overdue?'past grace':'due now') : '—');
+          return `<tr class="${r.status}">
+            <td class="num">${r.n}</td><td class="sub">${when}</td>
+            <td class="num">${c2(r.principalCents)}</td>
+            <td class="num">${c2(r.interestCents)}</td>
+            <td class="num">${c2(r.totalCents)}</td>
+            <td><span class="pill ${r.status==='paid'?'ok':r.status==='defaulted'?'bad':r.status==='due'?'warn':''}">${r.status}</span></td>
+          </tr>`;
+        }).join('')}
+      </table>
+      <div class="row" style="margin-top:10px">
+        <div><div class="sub">outstanding</div><div style="font-size:20px;font-weight:600">${c2(d.outstandingCents)}</div></div>
+        <button class="btn" ${canAct?'':'disabled'} onclick="call('/api/payoff?id=${d.id}')">
+          Settle early · ${c2(d.outstandingCents)}</button>
+      </div>`;
+  }catch(e){ schedule.innerHTML = '<div class="sub">'+e+'</div>'; }
+}
 
 async function call(path){
   document.querySelectorAll('.btn').forEach(b=>b.disabled=true);
@@ -181,20 +262,29 @@ async function refresh(){
     </div>`).join('');
 
   agreements.innerHTML = state.agreements.length ? state.agreements.map(a=>{
-    const cls = a.status==='Settled'?'ok':a.status==='Delinquent'?'bad':a.overdue?'warn':'ok';
+    const cls = a.status==='Settled'?'ok':a.status==='Delinquent'?'bad':a.late?'warn':'ok';
     const due = a.nextDueAt - state.now;
-    return `<div class="row">
+    const badge = a.status==='Active' && a.late ? 'LATE' : a.status.toUpperCase();
+    return `<div class="row" style="cursor:pointer${selected===a.id?';background:#161d2b':''}"
+                 onclick="selectAgreement(${a.id})">
       <div>
         <div>#${a.id} · ${usd(a.principal)} <span class="sub">→ ${a.merchant.slice(0,8)}…</span></div>
         <div class="sub">${a.paid}/${a.installments} paid · ${usd(a.installmentAmount)} each
           ${a.cardId?'· card '+a.cardId:''}</div>
       </div>
       <div style="text-align:right">
-        <span class="pill ${cls}">${a.status.toUpperCase()}</span>
-        <div class="sub">${a.status==='Active' ? (due>0? 'due in '+due+'s' : 'OVERDUE') : ''}</div>
+        <span class="pill ${cls}">${badge}</span>
+        <div class="sub">${a.status==='Active'
+          ? (due>0 ? 'due in '+due+'s' : (a.overdue?'PAST GRACE':'in grace period'))
+          : ''}</div>
       </div>
     </div>`;
   }).join('') : '<div class="sub">none yet</div>';
+
+  if (selected == null && state.agreements.length)
+    selected = state.agreements[state.agreements.length-1].id;
+  renderSteps(state);
+  if (selected != null) renderSchedule(selected);
 
   log.innerHTML = state.log.map(l=>`<div><span class="k">${l.kind}</span><span>${l.text}</span></div>`).join('');
 
@@ -235,8 +325,12 @@ agentBtn.onclick = async ()=>{
   refresh();
 };
 
+fetch('/api/onboarding').then(r=>r.json()).then(d=>{ onboarding = d; });
 refresh();
-setInterval(refresh, 1500);
+setInterval(()=>{
+  fetch('/api/onboarding').then(r=>r.json()).then(d=>{ onboarding = d; }).catch(()=>{});
+  refresh();
+}, 1500);
 </script>
 </body>
 </html>

@@ -66,6 +66,7 @@ contract InstallmentAgreement is Auth {
     );
     event InstallmentPaid(uint256 indexed id, uint16 number, uint256 amount, bool onTime);
     event AgreementSettled(uint256 indexed id);
+    event PaidOff(uint256 indexed id, uint256 amount, uint16 installmentsCleared);
     /// @dev The keeper watches this and freezes the Rain card on sight.
     event AgreementDelinquent(uint256 indexed id, address indexed agent, uint256 outstanding);
 
@@ -147,6 +148,49 @@ contract InstallmentAgreement is Auth {
             a.status = Status.Settled;
             emit AgreementSettled(id);
         }
+    }
+
+    /// @notice Settle the whole remaining balance at once. Every real
+    /// installment product has this, and an agent that comes into money
+    /// should not be forced to stay in debt.
+    ///
+    /// @dev Each cleared installment is credited to the agent's history, which
+    /// is a deliberate and slightly generous choice: an agent holding cash
+    /// could open a plan, immediately pay it off, and climb the ladder without
+    /// ever demonstrating reliability over time. Mitigating that properly means
+    /// gating tiers on elapsed time as well as count -- worth doing before this
+    /// is real, and called out rather than left as a silent hole.
+    function payoff(uint256 id) external {
+        Agreement storage a = agreements[id];
+        if (a.status != Status.Active) revert NotActive();
+
+        uint16 remaining = a.installments - a.paid;
+        uint256 amount = uint256(remaining) * a.installmentAmount;
+        bool onTime = block.timestamp <= a.nextDueAt + graceSeconds;
+
+        asset.transferFrom(msg.sender, address(pool), amount);
+
+        uint256 principalPortion = (a.principal / a.installments) * remaining;
+        pool.recordRepayment(id, amount, principalPortion);
+        for (uint16 i = 0; i < remaining; i++) {
+            score.recordRepayment(a.agent, a.installmentAmount, onTime);
+        }
+
+        a.paid = a.installments;
+        a.status = Status.Settled;
+
+        emit PaidOff(id, amount, remaining);
+        emit AgreementSettled(id);
+    }
+
+    /// @notice Past due but still inside the grace window -- late, not yet in
+    /// default. Servicing shows this; enforcement ignores it.
+    function isLate(uint256 id) external view returns (bool) {
+        Agreement memory a = agreements[id];
+        return
+            a.status == Status.Active &&
+            block.timestamp > a.nextDueAt &&
+            block.timestamp <= a.nextDueAt + graceSeconds;
     }
 
     /// @notice Callable by anyone once the grace window lapses. Permissionless

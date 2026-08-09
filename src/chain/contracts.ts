@@ -26,6 +26,8 @@ export const agreementAbi = parseAbi([
   'function agreementOf(uint256 id) view returns ((address agent,address merchant,uint256 principal,uint256 installmentAmount,uint16 installments,uint16 paid,uint16 aprBps,uint16 collateralBps,uint64 cadence,uint64 nextDueAt,uint8 status))',
   'function statusOf(uint256 id) view returns (uint8)',
   'function isDelinquent(uint256 id) view returns (bool)',
+  'function isLate(uint256 id) view returns (bool)',
+  'function payoff(uint256 id)',
   'function idsOf(address agent) view returns (uint256[])',
   'function outstandingOf(uint256 id) view returns (uint256)',
   'function nextId() view returns (uint256)',

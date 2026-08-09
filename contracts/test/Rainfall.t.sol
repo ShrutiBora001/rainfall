@@ -149,6 +149,57 @@ contract RainfallTest is Test {
         assertEq(a.reason, "agent not registered");
     }
 
+    // ---- early payoff ----
+
+    function test_PayoffSettlesTheWholeBalance() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        _payInstallments(id, 1);
+
+        uint256 owed = agreements.outstandingOf(id);
+        assertGt(owed, 0);
+
+        vm.prank(agent);
+        agreements.payoff(id);
+
+        assertEq(uint8(_status(id)), uint8(InstallmentAgreement.Status.Settled));
+        assertEq(agreements.outstandingOf(id), 0, "nothing left owing");
+    }
+
+    function test_PayoffCreditsEveryClearedInstallment() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        vm.prank(agent);
+        agreements.payoff(id);
+        // 4 installments cleared in one payment, all credited.
+        assertEq(score.recordOf(agent).onTime, 4);
+    }
+
+    function test_CannotPayoffTwice() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        vm.prank(agent);
+        agreements.payoff(id);
+        vm.expectRevert(InstallmentAgreement.NotActive.selector);
+        vm.prank(agent);
+        agreements.payoff(id);
+    }
+
+    // ---- late vs delinquent ----
+
+    function test_LateIsNotYetDelinquent() public {
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        // Past the due date but inside the grace window.
+        vm.warp(block.timestamp + CADENCE + 2);
+
+        assertTrue(agreements.isLate(id), "should read as late");
+        assertFalse(agreements.isDelinquent(id), "not delinquent yet");
+        vm.expectRevert(InstallmentAgreement.NotDue.selector);
+        agreements.markDelinquent(id);
+
+        // Paying inside grace still counts as on time.
+        vm.prank(agent);
+        agreements.pay(id);
+        assertEq(score.recordOf(agent).late, 0, "grace payment is not late");
+    }
+
     // ---- pool accounting ----
 
     function test_PoolEarnsTheSpread() public {

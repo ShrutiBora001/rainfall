@@ -58,6 +58,17 @@ const server = createServer(async (req, res) => {
       return json(200, await svc.buy(url.searchParams.get('sku') ?? 'phone'));
     }
 
+    if (url.pathname === '/api/onboarding') return json(200, await svc.onboarding());
+
+    if (url.pathname === '/api/schedule') {
+      return json(200, await svc.schedule(Number(url.searchParams.get('id'))));
+    }
+
+    if (url.pathname === '/api/payoff') {
+      await svc.payoff(Number(url.searchParams.get('id')));
+      return json(200, { ok: true });
+    }
+
     if (url.pathname === '/api/pay') {
       await svc.pay(Number(url.searchParams.get('id')));
       return json(200, { ok: true });

@@ -206,6 +206,103 @@ export class RainfallService {
     }
   }
 
+  /** Settle the remaining balance in one payment. */
+  async payoff(id: number): Promise<void> {
+    await this.send(this.dep.contracts.InstallmentAgreement, agreementAbi, 'payoff', [
+      BigInt(id),
+    ]);
+    this.say('payoff', `#${id} settled early — full balance cleared`);
+    await this.syncCollateral();
+  }
+
+  /**
+   * The amortization schedule: what a borrower actually signs. Interest here
+   * is flat (principal x APR, split evenly) rather than reducing-balance --
+   * simpler to verify on-chain, and stated plainly rather than dressed up as
+   * something it isn't.
+   */
+  async schedule(id: number) {
+    const a = await this.agr.read.agreementOf([BigInt(id)]);
+    const per = Number(a.installmentAmount / 10_000n);
+    const principalPer = Math.floor(Number(a.principal / 10_000n) / a.installments);
+    const interestPer = per - principalPer;
+
+    const rows = [];
+    for (let n = 1; n <= a.installments; n++) {
+      // nextDueAt tracks the *unpaid* head of the schedule; earlier rows are
+      // back-dated from it and later ones projected forward.
+      const dueAt = Number(a.nextDueAt) + (n - 1 - a.paid) * Number(a.cadence);
+      rows.push({
+        n,
+        dueAt,
+        totalCents: per,
+        principalCents: principalPer,
+        interestCents: interestPer,
+        status:
+          n <= a.paid
+            ? 'paid'
+            : a.status === 3
+              ? 'defaulted'
+              : n === a.paid + 1
+                ? 'due'
+                : 'scheduled',
+      });
+    }
+
+    return {
+      id,
+      principalCents: Number(a.principal / 10_000n),
+      totalPayableCents: per * a.installments,
+      totalInterestCents: interestPer * a.installments,
+      aprBps: a.aprBps,
+      installments: a.installments,
+      paid: a.paid,
+      cadenceSeconds: Number(a.cadence),
+      outstandingCents: Number((await this.agr.read.outstandingOf([BigInt(id)])) / 10_000n),
+      late: await this.agr.read.isLate([BigInt(id)]),
+      overdue: await this.agr.read.isDelinquent([BigInt(id)]),
+      status: ['None', 'Active', 'Settled', 'Delinquent'][a.status],
+      rows,
+    };
+  }
+
+  /**
+   * Origination: who is on the hook before any money moves. Three identity
+   * layers -- the Rain user who passed KYC, the principal who posts collateral,
+   * and the agent session key that actually transacts.
+   */
+  async onboarding() {
+    const C = this.dep.contracts;
+    const registeredTo = (await this.pub.readContract({
+      address: C.AgentRegistry,
+      abi: registryAbi,
+      functionName: 'principalOf',
+      args: [this.agent],
+    })) as string;
+    const registered = registeredTo !== '0x0000000000000000000000000000000000000000';
+
+    let rainUser: unknown = null;
+    if (this.railsMode === 'rain' && process.env.RAIN_API_KEY) {
+      rainUser = await fetch(
+        `${process.env.RAIN_BASE_URL ?? 'https://api-dev.rain.xyz'}/v1/issuing/users`,
+        { headers: { 'api-key': process.env.RAIN_API_KEY } },
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((u: any) => (Array.isArray(u) ? u[0] : u))
+        .catch(() => null);
+    }
+
+    return {
+      rainUser,
+      collateralContractId: this.collateralId,
+      collateral: await this.rails.getCollateral(this.collateralId).catch(() => null),
+      principal: this.principal,
+      agent: this.agent,
+      registered,
+      registeredTo: registered ? registeredTo : null,
+    };
+  }
+
   /** True once the grace window has lapsed -- the keeper's trigger. */
   async isOverdue(id: number): Promise<boolean> {
     return this.agr.read.isDelinquent([BigInt(id)]);
@@ -301,6 +398,7 @@ export class RainfallService {
         nextDueAt: Number(a.nextDueAt),
         status: ['None', 'Active', 'Settled', 'Delinquent'][a.status],
         overdue: await this.agr.read.isDelinquent([BigInt(i)]),
+        late: await this.agr.read.isLate([BigInt(i)]),
         cardId: this.cards.get(i) ?? null,
       });
     }

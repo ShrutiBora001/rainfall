@@ -684,7 +684,25 @@ export class RainfallService {
    * authorizes, while the buyer still owes four installments. Two windows side
    * by side make the split legible without a word of explanation.
    */
-  async storefront() {
+  private shopCache: { at: number; data: any } | null = null;
+  private shopInFlight: Promise<any> | null = null;
+
+  async storefront(): Promise<any> {
+    const now = Date.now();
+    if (this.shopCache && now - this.shopCache.at < this.stateTtlMs) return this.shopCache.data;
+    if (this.shopInFlight) return this.shopInFlight;
+    this.shopInFlight = this.readStorefront()
+      .then((d) => {
+        this.shopCache = { at: Date.now(), data: d };
+        return d;
+      })
+      .finally(() => {
+        this.shopInFlight = null;
+      });
+    return this.shopInFlight;
+  }
+
+  private async readStorefront() {
     const balances = await Promise.all(
       merchants().map(async (m) => ({
         ...m,

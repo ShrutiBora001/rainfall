@@ -47,7 +47,7 @@
   .pill.bad{background:rgba(255,92,122,.14);color:var(--bad)}
   .pill.warn{background:rgba(255,180,84,.14);color:var(--warn)}
   .big{font-size:30px;font-weight:650;letter-spacing:-1px}
-  #status{margin-top:14px;font-size:13px;color:var(--dim);min-height:20px}
+  #shopStatus{margin-top:14px;font-size:13px;color:var(--dim);min-height:20px}
 </style>
 </head>
 <body>
@@ -73,7 +73,7 @@
 </div>
 
 <div class="grid" id="shelf"></div>
-<div id="status"></div>
+<div id="shopStatus"></div>
 
 <div class="split">
   <div class="panel">
@@ -89,6 +89,13 @@
 <script>
 const usd = c => '$' + (c/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 let busy = false;
+// Resolved explicitly: relying on the id-to-global mapping is what broke this,
+// and any id colliding with a built-in Window property fails the same way.
+const shopStatus = document.getElementById('shopStatus');
+const shelf = document.getElementById('shelf');
+const merchants = document.getElementById('merchants');
+const orders = document.getElementById('orders');
+const srcOut = document.getElementById('srcOut');
 
 /** Straight to checkout, where the buyer picks the term. */
 function checkout(sku){
@@ -97,14 +104,14 @@ function checkout(sku){
 }
 
 async function buy(sku, label){
-  if (busy) { status.textContent = 'The agent is already working — one run at a time.'; return; }
+  if (busy) { shopStatus.textContent = 'The agent is already working — one run at a time.'; return; }
   busy = true;
 
   // An agent run takes 20-40s. Without a ticking clock the button reads as
   // broken, which is what "it gets stuck" actually was.
   const t0 = Date.now();
   const tick = setInterval(() => {
-    status.textContent = `Agent working on the ${label}… ${((Date.now()-t0)/1000).toFixed(0)}s`;
+    shopStatus.textContent = `Agent working on the ${label}… ${((Date.now()-t0)/1000).toFixed(0)}s`;
   }, 250);
 
   // Disable only the shelf buttons. Disabling every .btn on the page stranded
@@ -118,16 +125,16 @@ async function buy(sku, label){
       { signal: AbortSignal.timeout(180000) });
     const d = await r.json();
     if (r.status === 409) {
-      status.innerHTML = '<span style="color:var(--warn)">Another agent run is in progress — wait for it to finish.</span>';
+      shopStatus.innerHTML = '<span style="color:var(--warn)">Another agent run is in progress — wait for it to finish.</span>';
     } else if (d.error) {
-      status.innerHTML = '<span style="color:var(--bad)">'+d.error+'</span>';
+      shopStatus.innerHTML = '<span style="color:var(--bad)">'+d.error+'</span>';
     } else {
-      status.innerHTML = (d.scripted?'<span class="pill warn">SCRIPTED</span> ':'') + d.text
+      shopStatus.innerHTML = (d.scripted?'<span class="pill warn">SCRIPTED</span> ':'') + d.text
         + `<div class="sub" style="margin-top:6px">tools: ${(d.toolCalls||[]).join(' → ')}`
         + (d.usage ? ` · $${d.usage.costUsd.toFixed(4)}` : '') + `</div>`;
     }
   }catch(e){
-    status.innerHTML = '<span style="color:var(--bad)">'
+    shopStatus.innerHTML = '<span style="color:var(--bad)">'
       + (e.name === 'TimeoutError' ? 'Agent run timed out after 3 minutes.' : String(e)) + '</span>';
   } finally {
     clearInterval(tick);
@@ -137,13 +144,26 @@ async function buy(sku, label){
   }
 }
 
-async function refresh(){
-  const [shopRes, stateRes] = await Promise.all([
-    fetch('/api/shop').then(r=>r.json()),
-    fetch('/api/state').then(r=>r.json()),
-  ]);
+// Re-rendering innerHTML replaces every node inside it. On a 2s poll that
+// destroyed the buttons mid-click: if a refresh landed between mousedown and
+// mouseup the element was gone and the click never fired. Render only when the
+// content actually changed.
+let lastShelf = '', lastMerch = '', lastOrders = '';
 
-  shelf.innerHTML = shopRes.catalog.map(i=>{
+async function refresh(){
+  // A single failed poll must not tear the page down. Rate limiting on a public
+  // RPC produces the occasional 500, and an exception here used to leave the
+  // shelf half-rendered with dead buttons.
+  let shopRes, stateRes;
+  try {
+    [shopRes, stateRes] = await Promise.all([
+      fetch('/api/shop').then(r=>r.json()),
+      fetch('/api/state').then(r=>r.json()),
+    ]);
+  } catch { return; }
+  if (!shopRes || !Array.isArray(shopRes.catalog) || !stateRes || !stateRes.quotes) return;
+
+  const shelfHtml = shopRes.catalog.map(i=>{
     const q = stateRes.quotes[i.sku];
     const per = q && q.approved
       ? usd(Math.round(i.cents*(1+q.aprBps/10000)/q.installments)) + ' × ' + q.installments
@@ -164,15 +184,17 @@ async function refresh(){
         onclick="buy('${i.sku}', ${JSON.stringify(i.label)})">One-click · let the agent decide</button>
     </div>`;
   }).join('');
+  if (shelfHtml !== lastShelf) { shelf.innerHTML = shelfHtml; lastShelf = shelfHtml; }
 
-  merchants.innerHTML = shopRes.merchants.map(m=>`
+  const merchHtml = shopRes.merchants.map(m=>`
     <div class="row">
       <div><div>${m.name}</div><div class="sub">${m.address.slice(0,14)}…</div></div>
       <div style="text-align:right"><div class="big">${usd(m.settledCents)}</div>
         <div class="sub">received</div></div>
     </div>`).join('');
+  if (merchHtml !== lastMerch) { merchants.innerHTML = merchHtml; lastMerch = merchHtml; }
 
-  orders.innerHTML = shopRes.orders.length ? shopRes.orders.map(o=>{
+  const ordersHtml = shopRes.orders.length ? shopRes.orders.map(o=>{
     const cls = o.status==='Settled'?'ok':o.status==='Delinquent'?'bad':'warn';
     return `<div class="row">
       <div><div>${o.art} ${o.item}</div>
@@ -182,10 +204,11 @@ async function refresh(){
         <div class="sub">buyer owes ${usd(o.buyerOwesCents)} · ${o.installments}</div></div>
     </div>`;
   }).join('') : '<div class="sub">no orders yet</div>';
+  if (ordersHtml !== lastOrders) { orders.innerHTML = ordersHtml; lastOrders = ordersHtml; }
 }
 
 refresh();
-setInterval(()=>{ if(!busy) refresh(); }, 2000);
+setInterval(()=>{ if(!busy) refresh(); }, 4000);
 </script>
 </body>
 </html>

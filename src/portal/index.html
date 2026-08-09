@@ -248,8 +248,10 @@ function activeId(){
 }
 
 async function refresh(){
-  const r = await fetch('/api/state');
-  state = await r.json();
+  let next;
+  try { next = await fetch('/api/state').then(r=>r.json()); } catch { return; }
+  if (!next || !next.credit || !Array.isArray(next.agreements)) return;
+  state = next;
   const c = state.credit;
 
   chain.textContent = state.deployment.label + ' · ' + state.deployment.chainId;
@@ -376,7 +378,7 @@ refresh();
 setInterval(()=>{
   fetch('/api/onboarding').then(r=>r.json()).then(d=>{ onboarding = d; }).catch(()=>{});
   refresh();
-}, 1500);
+}, 2500);
 </script>
 </body>
 </html>

@@ -43,6 +43,38 @@
   .decline{background:rgba(255,92,122,.08);border:1px solid rgba(255,92,122,.3);
            border-radius:10px;padding:14px;font-size:13.5px;color:var(--bad)}
   #result{margin-top:14px;font-size:13.5px;min-height:20px}
+
+  /* Order confirmation */
+  #confirm{display:none}
+  #confirm.show{display:block;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  .tickwrap{display:flex;justify-content:center;margin:8px 0 18px}
+  .tick{width:84px;height:84px}
+  .tick circle{stroke:var(--ok);stroke-width:3;fill:none;
+    stroke-dasharray:210;stroke-dashoffset:210;animation:draw .55s ease-out .05s forwards}
+  .tick path{stroke:var(--ok);stroke-width:4;fill:none;stroke-linecap:round;stroke-linejoin:round;
+    stroke-dasharray:44;stroke-dashoffset:44;animation:draw .35s ease-out .5s forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  .glow{position:absolute;inset:0;pointer-events:none;border-radius:14px;
+    background:radial-gradient(420px 160px at 50% 0%,rgba(61,220,151,.14),transparent 70%);
+    opacity:0;animation:fade .8s ease-out .3s forwards}
+  @keyframes fade{to{opacity:1}}
+  .done-h{text-align:center;font-size:26px;font-weight:650;letter-spacing:-.5px;margin:0}
+  .done-s{text-align:center;color:var(--dim);font-size:13.5px;margin:8px 0 20px}
+  .stag{opacity:0;animation:rise .45s cubic-bezier(.2,.8,.2,1) both}
+  .stag:nth-child(1){animation-delay:.55s}
+  .stag:nth-child(2){animation-delay:.65s}
+  .stag:nth-child(3){animation-delay:.75s}
+  .stag:nth-child(4){animation-delay:.85s}
+  .stag:nth-child(5){animation-delay:.95s}
+  .conf{position:fixed;top:-12px;width:8px;height:14px;border-radius:2px;
+    pointer-events:none;z-index:50;animation:fall linear forwards}
+  @keyframes fall{to{transform:translateY(105vh) rotate(720deg);opacity:.1}}
+  @media (prefers-reduced-motion: reduce){
+    #confirm.show,.stag{animation:none;opacity:1}
+    .tick circle,.tick path{animation:none;stroke-dashoffset:0}
+    .conf{display:none}
+  }
 </style>
 </head>
 <body>
@@ -53,7 +85,7 @@
   <a href="/">agent portal</a>
 </header>
 
-<div class="panel">
+<div class="panel" id="cartPanel">
   <div class="label">Your cart</div>
   <div id="cart"><div class="sub">cart is empty</div></div>
 </div>
@@ -75,6 +107,23 @@
     <button class="btn" id="pay">Have the agent pay</button>
   </div>
   <div id="result"></div>
+</div>
+
+<div class="panel" id="confirm" style="position:relative;overflow:hidden">
+  <div class="glow"></div>
+  <div class="tickwrap">
+    <svg class="tick" viewBox="0 0 80 80">
+      <circle cx="40" cy="40" r="34" />
+      <path d="M25 41 l11 11 l20 -22" />
+    </svg>
+  </div>
+  <h2 class="done-h" id="doneH">Order placed</h2>
+  <p class="done-s" id="doneS"></p>
+  <div id="doneRows"></div>
+  <div class="row stag" style="margin-top:16px;border:0">
+    <a class="btn ghost" href="/shop" style="text-decoration:none;text-align:center">Keep shopping</a>
+    <a class="btn" href="/" style="text-decoration:none;text-align:center">Track repayment →</a>
+  </div>
 </div>
 
 <script>
@@ -143,18 +192,74 @@ document.getElementById('pay').onclick = async ()=>{
       + `on a ${chosen.installments}-installment plan. Check the terms and complete the purchase if acceptable.`;
     const r = await fetch('/api/agent?sku='+encodeURIComponent(data.item.sku)
       + '&installments='+chosen.installments + '&goal='+encodeURIComponent(goal)).then(r=>r.json());
-    result.innerHTML = r.error
-      ? '<span style="color:var(--bad)">'+r.error+'</span>'
-      : `<span class="pill ok">ORDER PLACED</span> ${r.scripted?'<span class="pill bad">SCRIPTED AGENT</span> ':''}
-         <div style="margin-top:8px">${r.text}</div>
-         <div class="sub" style="margin-top:6px">tools: ${(r.toolCalls||[]).join(' → ')}</div>
-         <div style="margin-top:10px"><a href="/">track repayment in the agent portal →</a></div>`;
-    sessionStorage.removeItem('cart');
+    if (r.error) {
+      result.innerHTML = '<span style="color:var(--bad)">'+r.error+'</span>';
+    } else {
+      sessionStorage.removeItem('cart');
+      await showConfirmation(r);
+    }
   }catch(e){ result.innerHTML = '<span style="color:var(--bad)">'+e+'</span>'; }
   btn.disabled = false; btn.textContent = 'Have the agent pay';
 };
 
+/**
+ * Swap the checkout for a confirmation. The obligation id is not in the agent's
+ * reply -- it decides what to buy, so the plan is only known after the fact --
+ * so read back the agent's newest obligation from chain state.
+ */
+async function showConfirmation(r){
+  let ob = null;
+  try {
+    const st = await fetch('/api/state').then(x=>x.json());
+    ob = (st.agreements || []).slice(-1)[0] || null;
+  } catch {}
+
+  document.querySelectorAll('#cartPanel,#creditPanel,#planPanel').forEach(el=>el.style.display='none');
+
+  doneS.innerHTML = (r.scripted ? '<span class="pill warn">SCRIPTED AGENT</span> ' : '')
+    + (ob ? `${data.item.label} — obligation #${ob.id} is open on Monad.` : data.item.label);
+
+  const rows = [];
+  rows.push([data.item.art + ' ' + data.item.label, usd(data.item.cents), data.item.merchant]);
+  if (ob) {
+    const per = usd(Number(BigInt(ob.installmentAmount) / 10000n));
+    rows.push(['Plan', `${ob.installments} × ${per}`, `${data.aprBps/100}% APR`]);
+    rows.push(['Merchant settled', usd(Number(BigInt(ob.principal) / 10000n)), 'paid in full, now']);
+    const due = ob.nextDueAt - (Date.now()/1000|0);
+    rows.push(['First installment', per, due > 0 ? `due in ${due}s` : 'due now']);
+  }
+  rows.push(['Agent', (r.toolCalls||[]).join(' → '),
+    r.usage ? '$' + r.usage.costUsd.toFixed(4) : '']);
+
+  doneRows.innerHTML = rows.map(([a,b,c]) => `
+    <div class="row stag">
+      <div>${a}<div class="sub">${c||''}</div></div>
+      <div style="text-align:right;font-weight:600">${b}</div>
+    </div>`).join('');
+
+  confirm_.classList.add('show');
+  confirm_.scrollIntoView({behavior:'smooth', block:'start'});
+  celebrate();
+}
+
+/** Brief, cheap, and disabled under prefers-reduced-motion. */
+function celebrate(){
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#3ddc97','#5aa9ff','#ffb454','#e8edf5'];
+  for (let i=0;i<40;i++){
+    const d = document.createElement('div');
+    d.className = 'conf';
+    d.style.left = Math.random()*100 + 'vw';
+    d.style.background = colors[i % colors.length];
+    d.style.animationDuration = (1.6 + Math.random()*1.4) + 's';
+    d.style.animationDelay = (Math.random()*0.35) + 's';
+    document.body.appendChild(d);
+    setTimeout(()=>d.remove(), 3600);
+  }
+}
+
 const cart_ = document.getElementById('cart');
+const confirm_ = document.getElementById('confirm');
 load();
 </script>
 </body>

@@ -33,7 +33,9 @@
   .btn:disabled{opacity:.35;cursor:not-allowed}
   .btn.primary{background:var(--accent);color:#04101f;border-color:transparent}
   .btn.danger{background:#3a1622;color:var(--bad);border-color:#5a2334}
-  .controls{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0}
+  .controls{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0;align-items:center}
+  .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.9px;color:var(--dim);
+       min-width:82px}
   .pill{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:650}
   .pill.ok{background:rgba(61,220,151,.14);color:var(--ok)}
   .pill.bad{background:rgba(255,92,122,.14);color:var(--bad)}
@@ -105,7 +107,11 @@
 </div>
 
 <div class="panel" style="margin:16px 0">
-  <div class="label">Agent — <span id="agentMode">—</span></div>
+  <div class="label">Run agent — <span id="agentMode">—</span></div>
+  <div class="sub" style="margin:-4px 0 12px">
+    Give it a goal and it decides what to do: reads the catalog, checks its own credit,
+    picks a plan, and buys — or explains why it can't. Nothing here names a product.
+  </div>
   <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
     <input id="goal" class="goal"
       value="You need a phone for a new hire. Find one, check what credit terms you can get, and buy it if the terms are acceptable." />
@@ -115,17 +121,25 @@
 </div>
 
 <div class="controls">
+  <span class="grp">Onboarding</span>
   <button class="btn" onclick="call('/api/setup')">Register agent</button>
   <button class="btn" onclick="if(confirm('Switch to a fresh agent identity? Clears credit history.'))call('/api/reset')">Reset — new agent</button>
-  <button class="btn" onclick="call('/api/buy?sku=phone')">Buy Nimbus 9a · $499</button>
-  <button class="btn" onclick="call('/api/buy?sku=bike')">Buy Corso e-bike · $1,200</button>
-  <a class="btn" href="/shop" style="text-decoration:none">Open storefront →</a>
+  <a class="btn" href="/shop" style="text-decoration:none">Storefront →</a>
+</div>
+<div class="sub" style="margin:-10px 0 4px">
+  <b>Register</b> opens the account — binds the agent to its principal on Monad, posts collateral
+  on Rain, issues the card. Done once, no AI involved. <b>Run agent</b> is the part that decides.
+</div>
+
+<div class="controls">
+  <span class="grp">Servicing</span>
   <button class="btn" id="payBtn">Pay next installment</button>
   <button class="btn danger" id="missBtn">Force a missed payment</button>
 </div>
 
 <div class="controls" style="border-top:1px solid var(--line);padding-top:14px">
-  <span class="tag">Keeper <b id="keeperState">off</b></span>
+  <span class="grp">Keeper</span>
+  <span class="tag"><b id="keeperState">off</b></span>
   <button class="btn" id="keeperBtn">Start keeper</button>
   <button class="btn" id="autopayBtn">Autopay: on</button>
   <button class="btn" onclick="call('/api/keeper/sweep')">Sweep now</button>

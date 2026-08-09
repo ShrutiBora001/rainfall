@@ -46,7 +46,12 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/source') {
       const q = url.searchParams.get('q');
       if (!q) return json(400, { error: 'describe what you need with ?q=' });
-      const { item, costUsd } = await sourceItem(q);
+      // Price against what this agent can actually borrow, so the shelf is
+      // stocked with things it could plausibly buy today.
+      const st = await svc.state();
+      const { item, costUsd } = await sourceItem(q, {
+        affordableUpToCents: Math.round(Number(st.credit.creditLimit) / 10_000),
+      });
       svc.say('stock', `merchandiser added ${item.label} for "${q}"`);
       return json(200, { item, costUsd });
     }

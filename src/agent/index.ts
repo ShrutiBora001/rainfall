@@ -138,7 +138,10 @@ async function runTool(
     }
 
     case 'source_item': {
-      const { item } = await sourceItem(String(input.request));
+      const st = await svc.state();
+      const { item } = await sourceItem(String(input.request), {
+        affordableUpToCents: Math.round(Number(st.credit.creditLimit) / 10_000),
+      });
       svc.say('stock', `merchandiser added ${item.label} — ${usd(item.cents)} at ${item.merchant}`);
       return JSON.stringify({
         sourced: true,

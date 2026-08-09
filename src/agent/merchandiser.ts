@@ -37,6 +37,9 @@ A shopper has asked for something the store does not stock. Add one product that
 Rules:
 - Invent fictional brands and merchant names. Never use a real company's name or a real product name.
 - Price realistically for the item, in US cents, between $50 and $3,000.
+- A store stocks what its customers can actually buy. When told the shopper's
+  available credit, price at or below it unless the request explicitly demands
+  a premium or professional-grade product — in which case say so in the blurb.
 - Choose the merchant category code from the provided list that genuinely matches the product.
 - Reuse an existing merchant name when the product plausibly belongs in that shop; otherwise invent one.
 - The sku is a short lowercase single word, no spaces.
@@ -62,7 +65,10 @@ export interface SourcedItem {
   costUsd: number;
 }
 
-export async function sourceItem(request: string): Promise<SourcedItem> {
+export async function sourceItem(
+  request: string,
+  opts: { affordableUpToCents?: number } = {},
+): Promise<SourcedItem> {
   const client = anthropic();
   const existing = catalog
     .list()
@@ -81,7 +87,11 @@ export async function sourceItem(request: string): Promise<SourcedItem> {
       {
         role: 'user',
         content:
-          `Shopper's request: ${request}\n\n` +
+          `Shopper's request: ${request}\n` +
+          (opts.affordableUpToCents
+            ? `Shopper's available credit: $${(opts.affordableUpToCents / 100).toFixed(2)}\n`
+            : '') +
+          `\n` +
           `Merchant category codes:\n` +
           MCCS.map((m) => `  ${m.code} — ${m.label}`).join('\n') +
           `\n\nAlready stocked:\n${existing}`,

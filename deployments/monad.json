@@ -1,12 +1,12 @@
 {
   "chainId": 10143,
   "contracts": {
-    "AgentRegistry": "0x9d22Db2dcdAc9a3e3bd84e4EccC86deA8DFA1062",
-    "CreditScore": "0x0be2cEaC324a0C96f0fB293d6eC78d50BD44c542",
-    "InstallmentAgreement": "0x1f79121bc334B7d78256BFe678aCFfbADDfAa291",
-    "LiquidityPool": "0x33Aab1B81Eb1D08F3f82eaC8a9898Ae8E7832E6d",
-    "MockUSDC": "0xc2c66cBaC20175f0460A34871947A47f77cE9524",
-    "Underwriter": "0x5d86fD73823Dea2C59a71c1801ae7eed6Be750Ca"
+    "AgentRegistry": "0x25dFB5Dd1d255027C52715677A427a34A7e27d5f",
+    "CreditScore": "0x2C0815b10769307dF0C5234fcFA783Fd73E7FEd0",
+    "InstallmentAgreement": "0x1465cdCC50415d844f13b5db82A8b7D344FE7185",
+    "LiquidityPool": "0xd2bA5b515ddD5DDD6d295f64D23a4e6AE44A7bA1",
+    "MockUSDC": "0xD3B9476424e09124D543EB6DEB4Ff5b4981B4826",
+    "Underwriter": "0x5c715077EA3Fc48C5F797622FC106DFa5F3aC5E5"
   },
   "deployer": "0x428581f8f49585bEA0E4e65F74AebF188D275b40",
   "label": "Monad testnet",

@@ -151,6 +151,39 @@ contract RainfallTest is Test {
         assertEq(a.reason, "agent not registered");
     }
 
+    // ---- score scale ----
+
+    function test_ScoreUsesTheFicoRange() public {
+        // A new agent opens with a thin file, not a bad one.
+        assertEq(score.scoreOf(agent), 580);
+        assertEq(score.scoreBand(agent), "fair");
+
+        _buildCleanHistory(); // 8 on-time
+        assertEq(score.scoreOf(agent), 580 + 8 * 25, "25 per on-time payment");
+        assertEq(score.scoreBand(agent), "very good");
+
+        // A default is severe but never drops below the floor.
+        (uint256 id,) = underwriter.authorize(agent, merchant, PHONE);
+        vm.warp(block.timestamp + CADENCE + 60);
+        agreements.markDelinquent(id);
+        assertEq(score.scoreOf(agent), 780 - 240);
+        assertEq(score.scoreBand(agent), "poor", "one default drops two bands");
+    }
+
+    /// Repeated penalties must clamp, not underflow. Driven directly against
+    /// the score contract because after the first default no further agreement
+    /// can be opened -- credit is revoked, so the lending path cannot reach the
+    /// second penalty at all.
+    function test_ScoreNeverFallsBelowTheFloor() public {
+        score.recordDefault(agent); // 580 -> 340
+        assertEq(score.scoreOf(agent), 340);
+        score.recordDefault(agent); // would underflow without the clamp
+        assertEq(score.scoreOf(agent), 300, "floored at 300");
+        score.recordDefault(agent);
+        assertEq(score.scoreOf(agent), 300, "stays floored");
+        assertEq(score.scoreBand(agent), "poor");
+    }
+
     // ---- checkout plans ----
 
     function test_BuyerCanChooseTheTerm() public {

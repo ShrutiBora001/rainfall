@@ -561,11 +561,12 @@ export class RainfallService {
   }
 
   private async readState() {
-    const [bps, limit, sc, rec, nextId, poolAssets, deployed, toNextTier, seasoning] =
+    const [bps, limit, sc, band, rec, nextId, poolAssets, deployed, toNextTier, seasoning] =
       await Promise.all([
         this.score.read.requiredCollateralBps([this.agent]),
         this.score.read.creditLimit([this.agent]),
         this.score.read.scoreOf([this.agent]),
+        this.score.read.scoreBand([this.agent]),
         this.score.read.recordOf([this.agent]),
         this.agr.read.nextId(),
         this.pool.read.totalAssets(),
@@ -627,6 +628,7 @@ export class RainfallService {
       rails: this.railsMode,
       credit: {
         score: sc,
+        band,
         requiredCollateralBps: bps,
         creditLimit: limit.toString(),
         onTime: rec.onTime,

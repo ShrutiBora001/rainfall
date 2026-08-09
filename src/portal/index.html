@@ -240,8 +240,8 @@ async function refresh(){
     : 'of every purchase must stay locked';
 
   limit.textContent = usd(c.creditLimit);
-  score.textContent = c.score;
-  hist.innerHTML = `${c.onTime} on time · ${c.late} late · ${c.defaults} defaults<br>`
+  score.innerHTML = c.score + '<span style="font-size:15px;color:var(--dim);font-weight:500"> / 850</span>';
+  hist.innerHTML = `<b style="text-transform:capitalize">${c.band}</b> · ${c.onTime} on time · ${c.late} late · ${c.defaults} defaults<br>`
     + `<span style="opacity:.75">${c.seasoned} counted toward the ladder`
     + (c.toNextTier ? ` · ${c.toNextTier} to next tier` : '')
     + `</span>`;

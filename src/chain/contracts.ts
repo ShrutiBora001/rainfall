@@ -9,6 +9,7 @@ export const creditScoreAbi = parseAbi([
   'function requiredCollateralBps(address agent) view returns (uint16)',
   'function creditLimit(address agent) view returns (uint256)',
   'function scoreOf(address agent) view returns (uint16)',
+  'function scoreBand(address agent) view returns (string)',
   'function recordOf(address agent) view returns ((uint32 onTime,uint32 late,uint32 defaults,uint96 totalRepaid,uint16 score,uint32 seasoned,uint64 lastSeasonedAt))',
   'function seasonedOf(address agent) view returns (uint32)',
   'function nextTierIn(address agent) view returns (uint32)',
